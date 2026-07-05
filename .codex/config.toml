@@ -1,0 +1,5 @@
+# Codex project configuration for the LLM Systems book workspace.
+# Codex reads AGENTS.md directly as the project document.
+
+# MCP servers can be mirrored here if needed by a local bridge.
+

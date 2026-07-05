@@ -1,0 +1,714 @@
+Distributed Training
+
+        Lei Li
+
+
+
+                       1
+                         Outline
+• Overview of large-scale model training
+
+• Multi-GPU communication
+
+• Data Parallel Training via AllReduce
+
+
+
+
+                                           4
+  size(B)
+10,000                     Scale of LLMs
+                                                                          1.8T
+                                                                          GPT4
+ 1,000                                                                                  671B
+                                                                   PALM            DeepSeek-v3
+                                                                                    LLaMA3.1
+                                                                                    Nemotron
+                                                          Gopher
+                                                GPT3
+  100                                                                               Qwen2
+
+
+    10                                                                              LLaMA3-8B
+
+                                      GPT2
+     1
+
+     0                      GPT1
+                   Transformer
+
+     0
+         2016   2017   2018        2019      2020      2021   2022    2023       2024   2025     5
+  Tokens (B)
+100,000           Scale of Training Data
+                                                                                   15T
+                                                                  GPT4          LLaMA3.1
+                                                                                   DeepSeek-v3
+ 10,000
+                                                                                 Qwen2
+  1,000                                                    PALM
+                                        GPT3      Gopher
+   100
+                              GPT2
+     10
+
+      1
+                    GPT1
+
+      0
+          2017   2018      2019      2020      2021   2022    2023       2024    2025    2026    6
+     Large-scale Distribution Training
+• Pretraining for Deepseek V3 (671B)
+  o 2,048 H800 GPUs
+  o trained for 2 months
+  o a total of 2.664 million H800 GPU hours
+
+• LLaMA 3.1(405B)
+  o using 16,000 H100 GPUs
+  o a total of 30.84 million GPU hours
+
+
+
+                                              7
+ Strategies for Scalable Training
+Partition the data   Partition the Model
+
+ single node            Model
+ data parallel          parallel
+
+
+  distributed           Pipeline
+ data parallel          parallel
+
+
+  parameter             Tensor
+    server              parallel
+                                           8
+Classical Distributed Training: Parameter Server
+             worker              worker              worker      worker
+                                                                          1   pull
+       2
+       partition
+Data
+                   3               3                    3          3
+
+            local grad          local grad         local grad   local grad
+
+                            4   push (worker to server)
+
+                                Parameter server
+                         5 aggregate grads, update parameters                    9
+                         Outline
+• Overview of large-scale model training
+
+• Multi-GPU communication
+
+• Data Parallel Training via AllReduce
+
+
+
+
+                                           10
+           Multi-GPU Communication
+• NCCL (Nvidia Collective Communication Library)
+  o provides inter-GPU communication APIs
+  o both collective and point-to-point send/receive primitives
+  o supports various of interconnect technologies
+     • PCIe
+     • NVLink
+     • InfiniBand
+     • IP sockets
+  o Operations are tied to a CUDA stream.
+
+
+                                                                 11
+                  NCCL Primitives
+• Broadcast
+
+• Reduce
+
+• ReduceScatter
+
+• AllGather
+
+• AllReduce
+
+
+                                    12
+                                  Broadcast
+    • The Broadcast operation copies an N-element buffer on the
+      root rank to all ranks (devices).
+
+
+
+
+ncclResult_t ncclBroadcast(const void* sendbuff, void* recvbuff,
+size_t count, ncclDataType_t datatype, int root, ncclComm_t comm, cudaStream_t stream)
+
+                                                                                         13
+                                     Reduce
+    • Compute reduction (max, min, sum) across devices and
+      write on one rank (device)
+
+
+
+
+ncclResult_t ncclReduce(const void* sendbuff, void* recvbuff,
+size_t count, ncclDataType_t datatype, ncclRedOp_t op, int root, ncclComm_t comm,
+cudaStream_t stream)
+                                                                                    14
+         AllReduce (=Reduce & Broadcast)
+   • Compute reduction (sum, min, max) across devices and
+     writing the result in the receive buffers of every rank.
+
+
+
+
+ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t
+datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream)
+
+
+                                                                                                15
+                              ReduceScatter
+   • Compute reduction (sum, min, max) and writing parts of
+     results scattered in ranks
+
+
+
+
+ncclResult_t ncclReduceScatter(const void* sendbuff, void* recvbuff, size_t recvcount,
+ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream)
+
+
+                                                                                         16
+                                     AllGather
+   • gathers N values from k ranks into an output of size k*N,
+     and distributes that result to all ranks (devices).
+
+
+
+
+ncclResult_t ncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcount,
+ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream)
+
+
+                 AllReduce = ReduceScatter & AllGather                               17
+            Data Pointers in CUDA
+• device memory local to the CUDA device
+
+• host memory registered using cudaHostRegister or
+  cudaGetDevicePointer
+
+• managed and unified memory.
+
+
+
+
+                                                     18
+            Point-to-Point Communication
+ncclGroupStart();
+
+ncclSend(sendbuff, sendcount, sendtype, peer, comm, stream);
+
+ncclRecv(recvbuff, recvcount, recvtype, peer, comm, stream);
+
+ncclGroupEnd();
+
+
+
+
+                                                               19
+       How Reduce is Implemented?
+• NCCL uses rings to move data across all GPUs and
+  perform reductions.
+
+
+
+
+                                                     20
+Broadcast with unidirectional ring
+
+
+
+
+                          N=bytes to transfer
+                          B=bandwidth
+
+                                            21
+Broadcast with unidirectional ring
+
+                           Step 1: t = N/B
+
+
+
+
+                          N=bytes to transfer
+                          B=bandwidth
+
+                                             22
+Broadcast with unidirectional ring
+
+                           Step 1: t = N/B
+                           Step 2: t = N/B
+
+
+
+
+                          N=bytes to transfer
+                          B=bandwidth
+
+                                             23
+Broadcast with unidirectional ring
+                         Step 1: t = N/B
+                         Step 2: t = N/B
+                         Step 3: t = N/B
+                         total time=(K-1) N/B
+
+
+
+                          N=bytes to transfer
+                          B=bandwidth
+
+                                            24
+Broadcast with unidirectional ring
+
+
+
+
+                          N=bytes to transfer
+                          B=bandwidth
+
+                                            25
+Broadcast with unidirectional ring
+                     break data into S messages
+                         Step 1: t = N/SB
+
+
+
+
+                          N=bytes to transfer
+                          B=bandwidth
+                                                26
+Broadcast with unidirectional ring
+                     break data into S messages
+                         Step 1: t = N/SB
+                         Step 2: t = N/SB
+
+
+
+
+                          N=bytes to transfer
+                          B=bandwidth
+                                                27
+Broadcast with unidirectional ring
+                     break data into S messages
+                         Step 1: t = N/SB
+                         Step 2: t = N/SB
+                         Step 3: t = N/SB
+
+
+
+
+                          N=bytes to transfer
+                          B=bandwidth
+                                                28
+Broadcast with unidirectional ring
+                     break data into S messages
+                         Step 1: t = N/SB
+                         Step 2: t = N/SB
+                         Step 3: t = N/SB
+                         Step 4: t = N/SB
+
+
+
+
+                          N=bytes to transfer
+                          B=bandwidth
+                                                29
+Broadcast with unidirectional ring
+                     break data into S messages
+                         Step 1: t = N/SB
+                         Step 2: t = N/SB
+                         Step 3: t = N/SB
+                         Step 4: t = N/SB
+                         …
+                         total time=(K-2+S)N/SB
+                         ~=N/B
+                          N=bytes to transfer
+                          B=bandwidth
+                                                30
+                                              Example
+//initializing NCCL, group API is required around ncclCommInitRank as it is
+//called across multiple GPUs in each thread/process NCCLCHECK(ncclGroupStart());
+for (int i=0; i<nDev; i++) {
+  CUDACHECK(cudaSetDevice(localRank*nDev + i));
+  NCCLCHECK(ncclCommInitRank(comms+i, nRanks*nDev, id, myRank*nDev + i));
+}
+NCCLCHECK(ncclGroupEnd());
+//calling NCCL communication API. Group API is required when using
+//multiple devices per thread/process
+NCCLCHECK(ncclGroupStart());
+for (int i=0; i<nDev; i++)
+  NCCLCHECK(ncclAllReduce((const void*)sendbuff[i], (void*)recvbuff[i], size, ncclFloat, ncclSum, comms[i], s[i]));
+NCCLCHECK(ncclGroupEnd());
+//synchronizing on CUDA stream to complete NCCL communication
+for (int i=0; i<nDev; i++)
+  CUDACHECK(cudaStreamSynchronize(s[i]));
+
+
+
+
+                                                                                                                      31
+ Implementing Parameter Server using
+               NCCL
+• Pull: ncclBroadcast
+  o Parameter server to send parameters to all workers
+
+• Push: ncclReduce
+  o workers send grads to server and sum
+
+• Synchronization:
+  o workers need to wait for server to send param
+  o server need to wait for work to send grad * N
+
+                                                         32
+                         Outline
+• Overview of large-scale model training
+
+• Multi-GPU communication
+
+• Data Parallel Training via AllReduce
+
+
+
+
+                                           33
+                       Data Parallel Training
+                worker               worker          worker          worker
+
+
+       1
+       partition
+Data
+                   2                  2               2               2
+
+            local grad           local grad     local grad       local grad
+
+                         34
+                              AllReduce (compute average grad)
+            4                    4               4               4
+            param update         param update    param update    param update   35
+      How to Synchronize Gradients?
+• Naïve all-reduce
+
+
+
+
+                                      36
+              Ring AllReduce
+                 worker 0
+               a0 a1 a2 a3
+
+
+  worker 3                       worker 1
+d0 d1 d2 d3                    b0 b1 b2 b3
+
+
+                 worker 2
+               c0 c1 c2 c3
+                                             37
+              Ring AllReduce
+                 worker 0
+         d3                    a0
+               a0 a1 a2 a3
+
+
+  worker 3                           worker 1
+d0 d1 d2 d3                    b0 b1 b2 b3
+
+
+         c2      worker 2           b1
+               c0 c1 c2 c3
+                                                38
+                     Ring AllReduce
+                           worker 0
+                      a0 a1 a2        a3+d3
+
+
+
+
+  worker 3                                            worker 1
+d0 d1   d2+c2
+                d3                            a0+b0
+                                                      b1 b2 b3
+
+
+                           worker 2
+                      c0   b1+c1
+                                   c2 c3
+                                                                 39
+                     Ring AllReduce
+                           worker 0
+          c2+d2                               a3+d3
+                      a0 a1 a2        a3+d3
+
+
+
+
+  worker 3                                            worker 1
+d0 d1   c2+d2
+                d3                            a0+b0
+                                                      b1 b2 b3
+
+
+                           worker 2              a0+b0
+          b1+c1
+                      c0   b1+c1
+                                   c2 c3
+                                                                 40
+                          Ring AllReduce
+                                   worker 0
+                           a0 a1           a2+c2
+                                            +d2
+                                                   a3+d3
+
+
+
+
+     worker 3                                                      worker 1
+d0   b1+c1
+      +d1
+             c2+d2
+                     d3                                    a0+b0
+                                                                   b1 b2      a3+b3
+                                                                               +d3
+
+
+
+
+                                   worker 2
+                           a0+b0
+                            +c0
+                                   b1+c1
+                                           c2 c3
+                                                                                      41
+                          Ring AllReduce
+                                   worker 0
+        b1+c1+d1                                           a2+c2+d2
+                           a0 a1           a2+c2
+                                            +d2
+                                                   a3+d3
+
+
+
+
+     worker 3                                                      worker 1
+d0   b1+c1
+      +d1
+             c2+d2
+                     d3                                    a0+b0
+                                                                   b1 b2      a3+b3
+                                                                               +d3
+
+
+
+
+                                   worker 2                   a3+b3+d3
+      a0+b0+c0
+                           a0+b0
+                            +c0
+                                   b1+c1
+                                           c2 c3
+                                                                                      42
+                             Ring AllReduce
+                                      worker 0
+                              a0      a1+b1
+                                      c1+d1
+                                              a2+c2
+                                               +d2
+                                                      a3+d3
+
+
+
+
+        worker 3                                                      worker 1
+a0+b0
+c0+d0
+        b1+c1
+         +d1
+                c2+d2
+                        d3                                    a0+b0
+                                                                      b1   a2+b2
+                                                                           c2+d2
+                                                                                   a3+b3
+                                                                                    +d3
+
+
+
+
+                                      worker 2
+                              a0+b0
+                               +c0
+                                      b1+c1
+                                              c2      a3+b3
+                                                      c3+d3
+
+                                                                                           43
+                             Ring AllReduce
+                                      worker 0
+                              a0      a1+b1
+                                      c1+d1
+                                              a2+c2
+                                               +d2
+                                                      a3+d3
+
+
+
+
+        worker 3                                                      worker 1
+a0+b0
+c0+d0
+        b1+c1
+         +d1
+                c2+d2
+                        d3                                    a0+b0
+                                                                      b1   a2+b2
+                                                                           c2+d2
+                                                                                   a3+b3
+                                                                                    +d3
+
+
+
+
+                                      worker 2
+                              a0+b0
+                               +c0
+                                      b1+c1
+                                              c2      a3+b3
+                                                      c3+d3
+
+                                                                                           44
+                   Ring AllReduce
+                      worker 0
+                       a1+b1
+                       c1+d1
+
+
+
+
+        worker 3                         worker 1
+a0+b0                                        a2+b2
+c0+d0                                        c2+d2
+
+
+
+
+                      worker 2
+                                 a3+b3
+                                 c3+d3
+
+                                                     45
+                                Ring AllReduce
+                                         worker 0
+                                 a0+b0   a1+b1   a2+b2   a3+b3
+                                 c0+d0   c1+d1   c2+d2   c3+d3
+
+
+
+
+        worker 3                                                         worker 1
+a0+b0   a1+b1   a2+b2   a3+b3        AllGather                   a0+b0   a1+b1   a2+b2
+c0+d0   c1+d1   c2+d2   c3+d3                                    c0+d0   c1+d1   c2+d2
+
+
+
+
+                                         worker 2
+                                 a0+b0   a1+b1   a2+b2   a3+b3
+                                 c0+d0   c1+d1   c2+d2   c3+d3
+
+                                                                                         46
+Ring all-reduce: Implementing Scatter-reduce
+          for (int i = 0; i < size - 1; i++) {
+                    int recv_chunk = (rank - i - 1 + size) % size;
+                    int send_chunk = (rank - i + size) % size;
+                    float* segment_send = &(output[segment_ends[send_chunk] -
+                               segment_sizes[send_chunk]]);
+
+                 MPI_Irecv(buffer, segment_sizes[recv_chunk],
+                        datatype, recv_from, 0, MPI_COMM_WORLD, &recv_req);
+
+                 MPI_Send(segment_send, segment_sizes[send_chunk],
+                       MPI_FLOAT, send_to, 0, MPI_COMM_WORLD);
+
+                 float *segment_update = &(output[segment_ends[recv_chunk] -
+                                segment_sizes[recv_chunk]]);
+
+                 // Wait for recv to complete before reduction
+                 MPI_Wait(&recv_req, &recv_status);
+
+                 reduce(segment_update, buffer, segment_sizes[recv_chunk]);
+          }
+
+
+
+
+                                                                                47
+Ring all-reduce: Implementing All-gather
+        for (size_t i = 0; i < size_t(size - 1); ++i) {
+                 int send_chunk = (rank - i + 1 + size) % size;
+                 int recv_chunk = (rank - i + size) % size;
+
+                // Segment to send - at every iteration we send segment (r+1-i)
+                float* segment_send = &(output[segment_ends[send_chunk] -
+                         segment_sizes[send_chunk]]);
+
+                // Segment to recv - at every iteration we receive segment (r-i)
+                float* segment_recv = &(output[segment_ends[recv_chunk] -
+                         segment_sizes[recv_chunk]]);
+                MPI_Sendrecv(segment_send, segment_sizes[send_chunk],
+                         datatype, send_to, 0, segment_recv,
+                         segment_sizes[recv_chunk], datatype, recv_from,
+                         0, MPI_COMM_WORLD, &recv_status);
+        }
+
+
+
+
+                                                                                   48
+  Parameter Server vs AllReduce Data
+               Parallel
+• Parameter Server
+  o needs to synchronize twice (parameters and local gradients)
+
+• AllReduce Data Parallel
+  o each local worker needs to update parameters
+  o redundant?
+  o local updating is much faster than transferring data across gpus
+
+
+
+
+                                                                       49
+                          Summary
+• Overall idea: partition the data, distribute the
+  forward/backward
+
+• Parameter Server
+  o server to update and distribute parameters, worker to get local
+    grad
+
+• NCCL Multi-GPU communication
+  o using ring and batching to reduce the latency for Broadcast
+
+• Data Parallel Training via All Reduce
+  o Efficient Ring AllReduce (ScatterReduce+AllGather)                50
+           Reading for next lecture
+• PyTorch Distributed: Experiences on Accelerating Data
+  Parallel Training. VLDB 2020.
+
+
+
+
+                                                          51
+

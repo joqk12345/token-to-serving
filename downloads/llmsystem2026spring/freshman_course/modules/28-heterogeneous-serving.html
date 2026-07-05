@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>异构硬件上的 LLM Serving | LLM 系统新生导学</title>
+  <style>
+  :root { --ink:#172033; --muted:#607089; --line:#d8e0ec; --bg:#f6f8fb; --panel:#fff; --blue:#2563eb; --green:#15803d; --amber:#b45309; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif; background: var(--bg); color: var(--ink); letter-spacing: 0; }
+  main { max-width: 920px; margin: 0 auto; padding: 28px 18px 48px; }
+  header, section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 22px; margin-bottom: 14px; box-shadow: 0 10px 28px rgba(23,32,51,.07); }
+  a { color: var(--blue); text-decoration: none; } a:hover { text-decoration: underline; }
+  .back { display: inline-flex; margin-bottom: 12px; font-weight: 700; }
+  h1 { margin: 0 0 8px; font-size: clamp(28px, 4vw, 42px); line-height: 1.08; }
+  h2 { margin: 0 0 12px; font-size: 21px; }
+  p, li { line-height: 1.8; font-size: 16px; }
+  .meta { color: var(--muted); margin: 0; }
+  .tag { display:inline-flex; border-radius:999px; padding:4px 10px; background:#eaf1ff; color:#1d4ed8; font-weight:700; font-size:13px; margin-right:8px; }
+  .grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:14px; }
+  .callout { border-left: 4px solid var(--green); background:#e9f7ef; padding:12px 14px; border-radius:8px; }
+  .questions li::marker { color: var(--amber); font-weight: 800; }
+  @media (max-width: 760px) { .grid { grid-template-columns:1fr; } header, section { padding:18px; } }
+</style>
+</head>
+<body>
+  <main>
+    <a class="back" href="../index.html">返回互动课堂</a>
+    <header>
+      <span class="tag">推理、微调与在线服务</span>
+      <h1>异构硬件上的 LLM Serving</h1>
+      <p class="meta">这是一篇面向大学新生的导学文档，根据课程课件重新组织。原始 PDF 仍保留在文末，供深入阅读。</p>
+    </header>
+    <section>
+      <h2>学习目标</h2>
+      <ul><li>理解异构硬件的含义</li><li>认识 CPU、GPU、存储的协作</li><li>知道成本和速度的权衡</li></ul>
+    </section>
+    <section>
+      <h2>核心解释</h2>
+      <p>异构服务系统会同时使用不同类型硬件，例如 GPU、CPU、内存、SSD 或专用加速器。</p><p>不是所有数据都必须放在最贵最快的设备上。系统可以根据访问频率和速度需求分层放置。</p><p>异构设计的难点是数据移动。如果搬运成本太高，便宜硬件也可能拖慢整体服务。</p>
+    </section>
+    <section>
+      <h2>课堂例子</h2>
+      <p class="callout">宿舍里常用物品放桌上，不常用物品放柜子，极少用的放仓库。系统也会把数据放在不同速度和成本的层级。</p>
+    </section>
+    <section>
+      <h2>检查问题</h2>
+      <ol class="questions"><li>为什么异构硬件能降低成本？</li><li>数据移动为什么可能成为瓶颈？</li></ol>
+    </section>
+    <section>
+      <h2>原始资料</h2>
+      <p><a href="../../source_pdfs/llmsys-28-mooncake-kTransformer-1243bfbecbb0c3610bf95eac030acb2a.pdf" target="_blank" rel="noopener">打开原始课件 PDF</a></p>
+    </section>
+  </main>
+</body>
+</html>

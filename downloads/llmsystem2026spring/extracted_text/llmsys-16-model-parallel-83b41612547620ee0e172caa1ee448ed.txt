@@ -1,0 +1,456 @@
+Model Parallel Training
+
+          Lei Li
+                     Today’s Topic
+• Model Parallel Training
+
+• Pipeline Parallelism
+
+• Tensor Parallelism
+
+
+
+
+                                     2
+                       Model Parallelism
+Motivation: The size of models increases exponentially fast and large.
+It is no longer possible to fit these large models into the memory of a
+single GPU.
+  size(B)
+10,000
+                                                                 GPT4 DeepSeek-v3
+ 1,000                                                    PALM
+                                          GPT3   Gopher                   Qwen3
+   100                                                                 LLaMA3.1
+
+    10
+     1                             GPT2
+
+     0                      GPT1
+                   Transformer
+     0
+         2016   2017   2018    2019   2020   2021    2022    2023    2024   2025    3
+                      Model Parallel Training
+ Partition the model’s computation (forward/backward/update)
+ across multiple workers.
+ Distributed layer-wise computation         Distributed tensor computation
+                           loss
+  device 3, layer 3   F3          B3
+  device 2, layer 2   F2          B2
+  device 1, layer 1   F1          B1
+  device 0, layer 0   F0          B0
+
+                       grad update
+
+more advanced parallel training (expert parallelism) will be introduced later. 4
+                          Pipeline Parallelism
+     Naïve Model Parallel: The model is distributed across multiple
+     GPUs over layers.
+                   loss
+                                                         nccl send/recv
+dev3, layer 3 F3          B3
+                                 dev3                  F3 B3                update
+dev2, layer 2 F2          B2                      F2           B2           update
+                                 dev2
+dev1, layer 1 F1          B1     dev1        F1                     B1      update
+                                 dev0   F0                               B0 update
+dev0, layer 0 F0          B0                           time
+               grad update         Any disadvantage?
+                               all but one GPU is idle at any given moment!
+                                                                                     5
+          Pipeline Parallelism Illustration
+each device needs to calculate forward/backward,
+memory: store params/grads/activations for the layers on each device.
+
+
+
+
+                https://siboehm.com/articles/22/pipeline-parallel-training   6
+nccl send/recv
+                 7
+  Limitations of Naïve Pipeline Parallel
+• Low GPU utilization
+  o at any point of time, only one device is working. others are idle.
+
+• No interleaving of computation and communication
+  o While sending intermediate results to next device, GPUs are idle.
+
+• High memory demand
+  o 1st GPU needs to store all activations until the whole batch
+    completes.
+
+
+                                                                         8
+           Improving Pipeline Parallel: GPipe
+• Key idea: Divides input data batches into smaller micro-
+  batches, pipelining microbatches.
+
+• A batch is usually decided by GPU memory size and
+  memory needed for one data sample’s forward/backward
+      o as large as possible to fill the GPU memory
+
+• A mciro-batch can be smaller
+
+
+[1] Huang, Yanping, et al. "Gpipe: Efficient training of giant neural networks using pipeline parallelism." Advances in neural information processing systems 32 (2019).   9
+                Pipeline Parallel via Micro-batching
+GPipe: Divides input data mini-batches into smaller micro-batches.
+Send each micro-batch results (layer output) immediately once
+completing (one small) forward.
+Finishing all forward before starting backward for micro-batches.
+
+
+
+
+(i) the number of model partitions K (i.e. number of devices)
+(ii) the number of micro-batches M
+(iii) the number of model layers: L
+                                                                                                                                                                           10
+[1] Huang, Yanping, et al. "Gpipe: Efficient training of giant neural networks using pipeline parallelism." Advances in neural information processing systems 32 (2019).
+                    Microbatch Pipelining
+ GPipe: Divides input mini-batches into smaller micro-batches.
+ During backward, recomputes forward, then send microbatch
+ gradients immediately once ready.
+
+
+
+
+                    𝐾−1
+Bubble overhead: 𝑂(       ) could be negligible when 𝑀 > 4 × 𝐾
+                    𝑀+𝐾−1
+Communication overhead: transfer activation tensors at the partition boundaries
+                                             𝐿   𝑁
+Peak activation memory: 𝑂(𝑁 × 𝐿) ➔ 𝑂(𝑁 + × ) with gradient checkpoint (later)     11
+                                          𝐾   𝑀
+               GPipe Performance
+Normalized training throughput using Gpipe with different #
+of partitions K and different # of micro-batches M on TPUs
+and GPUs without high-speed interconnect.
+
+
+
+
+                                                              12
+Reduce PP Memory Cost: Gradient Checkpointing
+ Re-materialization
+ • Forward pass: each accelerator only stores output activations
+ • Backward pass: the k–th accelerator recomputes the composite
+   forward function Fk
+
+ Vanilla backprop                                                                                                    Memory poor backprop
+
+
+
+
+   ▪ Memory for activations: O(n)                                                                            ▪ Memory for activations: O(1)
+   ▪ Node computation: O(n)                                                                                  ▪ Node computation: O(n2)
+ [1] Chen, Tianqi, et al. "Training deep nets with sublinear memory cost." arXiv preprint arXiv:1604.06174 (2016).
+ [2] https://github.com/cybertronai/gradient-checkpointing                                                                                    13
+                                       Gradient Checkpointing
+Gradient checkpoint
+• Cash the activations of every sqrt(n) layers
+• Memory for activations: O(n)
+• Node computation: O(sqrt(n) * sqrt(n)) = O(n)
+
+
+
+
+[1] Chen, Tianqi, et al. "Training deep nets with sublinear memory cost." arXiv preprint arXiv:1604.06174 (2016).
+[2] https://github.com/cybertronai/gradient-checkpointing                                                           14
+       Limitations of Pipeline Parallel
+
+
+
+
+finishing all forward before backward on micro-batches.
+number of micro-batches in-flight (completed forward but not
+backward): 8 in this example,
+need to store all the activations for these micro-batches      15
+Improving Pipeline Parallel with 1F1B flush
+• PipeDream-Flush 1F1B – start backward as soon as possible
+
+
+
+
+• benefit: reduce memory cost for storing the activations
+• number of micro-batches in flight (completed forward but not
+  backward): at most 4 (assuming 1B=2F) vs 8 in GPipe.
+
+   PipeDream: generalized pipeline parallelism for DNN training. Narayanan et al. SOSP 2019.   16
+Further Improving Pipeline Parallel by Chunking
+     Model Layers and Interleaving Stages
+                                Chunk 1 Layers          Chunk 2 Layers
+       Device 1                 1, 2                    9, 10
+       Device 2                 3, 4                    11, 12
+       Device 3                 5, 6                    13, 14
+       Device 4                 7, 8                    15, 16
+Complete smaller computation for each chunk and 2 stages of F/B
+
+
+
+
+                                                                                                              17
+  Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM. Narayanan et al SC 2021.
+         Implementing GPipe Parallelism
+def minibatch_steps(self):
+  yield [ZeroGrad()]
+
+  # STAGE 1: First, we FWD all microbatches
+  for microbatch_id in range(self.num_micro_batches):
+    yield self.steps_FWD_microbatch(microbatch_id)
+
+  # at this position, all microbatches are in flight and
+  # memory demand is highest
+
+  # STAGE 2: Then, we BWD all microbatches
+  for microbatch_id in reversed(range(self.num_micro_batches)):
+    yield from self.steps_BWD_microbatch(microbatch_id)
+
+  # updating the weights is the last step of processing any batch
+  yield [OptimizerStep()]
+
+              full code in https://github.com/siboehm/shallowspeed   18
+def steps_FWD_microbatch(self, microbatch_id):
+  cmds = []
+  if self.is_first_stage:
+     # first pipeline stage loads data from disk
+     cmds.append(LoadMicroBatchInput(microbatch_id=microbatch_id))
+  else:
+     # all other stages receive activations from prev pipeline stage
+     cmds.append(RecvActivations())
+
+  cmds.append(Forward(microbatch_id=microbatch_id))
+
+  if not self.is_last_stage:
+     # all but the last pipeline stage send their output to next stage
+     cmds.append(SendActivations())                                      non-blocking
+  return cmds
+
+
+
+
+                                                                                        19
+def steps_BWD_microbatch(self, microbatch_id):
+  cmds = []
+  if self.is_last_stage:
+     # last pipeline stage loads data from disk
+     cmds.append(LoadMicroBatchTarget(microbatch_id=microbatch_id))
+  else:
+     # all other stages wait to receive grad from prev stage
+     cmds.append(RecvOutputGrad())
+
+  # the first microBatch is the lasted one that goes through backward pass
+  if self.is_first_microbatch(microbatch_id):
+     # interleaved backprop and AllReduce during last microBatch of BWD
+     cmds.append(BackwardGradAllReduce(microbatch_id=microbatch_id))
+  else:
+     cmds.append(BackwardGradAcc(microbatch_id=microbatch_id))
+
+  if not self.is_first_stage:
+     # all but last pipeline stage send their input grad to prev stage
+     cmds.append(SendInputGrad())
+  yield cmds
+                                                                             20
+        Pipeline Parallelism in pytorch
+torch.distributed.pipelining
+
+• It consists of two stages
+  o build PipelineStage
+     ▪ manually splitting the model
+     ▪ splitting model automatically
+  o use PipelineSchedule for execution
+
+
+
+
+                                          21
+class Transformer(nn.Module):
+ def __init__(self, model_args: ModelArgs):
+   super().__init__()
+   self.tok_embeddings = nn.Embedding(...)
+   # Using a ModuleDict lets us delete layers without affecting names, ensuring checkpoints will correctly save and
+load.
+   self.layers = torch.nn.ModuleDict()
+   for layer_id in range(model_args.n_layers):
+    self.layers[str(layer_id)] = TransformerBlock(...)
+   self.output = nn.Linear(...)
+
+ def forward(self, tokens: torch.Tensor):
+  # Handling layers being 'None' at runtime enables easy pipeline splitting
+  h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
+  for layer in self.layers.values():
+   h = layer(h, self.freqs_cis)
+  h = self.norm(h) if self.norm else h
+  output = self.output(h).float() if self.output else h
+  return output
+
+     https://pytorch.org/docs/main/distributed.pipelining.html                                                    22
+from torch.distributed.pipelining import PipelineStage
+
+with torch.device("meta"):
+ assert num_stages == 2, "This is a simple 2-stage example"
+ # we construct the entire model, then delete the parts we do not need for this stage # in practice, this can
+be done using a helper function that automatically divides up layers across stages.
+ model = Transformer()
+ if stage_index == 0: # prepare the first stage model
+   del model.layers["1"]
+   model.norm = None
+   model.output = None
+ elif stage_index == 1: # prepare the second stage model
+   model.tok_embeddings = None
+   del model.layers["0"]
+ stage = PipelineStage(model, stage_index, num_stages, device)
+
+
+
+
+                                                                                                                23
+from torch.distributed.pipelining import ScheduleGPipe
+# Create a schedule
+schedule = ScheduleGPipe(stage, n_microbatches)
+# Input data (whole batch)
+x = torch.randn(batch_size, in_dim, device=device)
+# Run the pipeline with input `x` # `x` will be divided into microbatches automatically
+if rank == 0:
+  schedule.step(x)
+else:
+  output = schedule.step()
+
+
+
+
+                                                                                          24
+Tensor Parallelism
+
+                26
+   Tensor Parallelism – spliting the matrix
+                computation
+  Matrix multiplication on 1 GPU
+
+                                   =
+   A                   B                      C
+  Matrix multiplication on 2 GPUs
+                                                     AllGather
+                              =
+   A            B1     B2              C1     C2            C=[C1, C2]
+GPU1, GPU2    GPU1    GPU2             GPU1   GPU2          GPU1, GPU2
+                                                                         27
+Tensor Parallelism for FFN (big mat mul)
+
+
+
+
+                            Splitting X and A
+
+
+
+
+              All-reduce (to compute XA) is needed！28
+Tensor Parallelism for FFN
+                           GPU1
+
+
+
+
+                          GPU2
+         Splitting weight A         weight B
+           𝐴 = 𝐴1 , 𝐴2 ,                  𝐵1
+                                    𝐵=         ,
+                                          𝐵2
+     [𝑌1 , 𝑌2 ] = GeLU(𝑋 ∙ 𝐴1 ), GeLU(𝑋 ∙ 𝐴2 ) ,
+        All-reduce is not needed (for Y)！
+              𝑍 = 𝑌1 ∙ 𝐵1 +𝑌2 ∙ 𝐵2                 29
+Tensor Parallelism for Self-Attention
+                                 GPU1
+
+
+
+
+                                 GPU2
+
+
+               • Split weights over columns (heads)
+               • All-reduce is not needed！
+
+
+                                                      30
+Tensor Parallelism - Embeddings
+                  • Input embedding
+                      • Split over columns
+
+                     • all-reduce is required
+
+                  • Output embedding
+                     • Split over columns
+
+                     • Fuse outputs with
+                       cross-entropy loss
+                       (huge reduction in
+                       communication)
+                     • all-gather is needed
+                                                31
+Tensor Parallelism
+
+        • Layer normalization, dropout,
+          residual connections
+            • Duplicate across GPUs
+
+        • Each model parallel worker
+          optimizes its own set of
+          parameters
+
+
+
+
+                                          32
+  Combination of Pipeline and Tensor
+         Model Parallelism
+
+
+
+
+#PP and #TP depend on model architecture and
+GPU server config
+                                               33
+    Combination of Pipeline and Tensor
+           Model Parallelism
+• Takeaway #1: When considering different forms of model parallelism, tensor
+  model parallelism should generally be used up to degree 𝑔 when using 𝑔-GPU
+  servers, and then pipeline model parallelism can be used to scale up to larger
+  models across servers ➔ TP for in-node parallel computing
+
+
+
+
+                                                                                   34
+         Model Parallel + Data Parallel
+• Takeaway #2: When using data and model parallelism, a total
+  model-parallel size of 𝑀 = 𝑡 · 𝑝 should be used so that the model’s
+  parameters and intermediate metadata fit in GPU memory; data
+  parallelism can be used to scale up training to more GPUs.
+
+
+
+
+                                                                        35
+   Summary of Model Parallel Training
+• Pipeline Parallelism
+  o split by layers (horizonal split)
+  o eliminate the bubbles (idle)
+  o interleaving forward/backward
+
+• Tensor Parallelism
+  o split the matrix computation over multiple GPUs
+  o usually within a single node
+
+
+
+                                                      38
+              Quiz
+• on canvas
+
+
+
+
+                     39
+

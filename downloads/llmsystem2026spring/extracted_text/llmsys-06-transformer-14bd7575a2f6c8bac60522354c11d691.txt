@@ -1,0 +1,411 @@
+Transformer
+
+    Lei Li
+                                 Recap
+• Learning parameters of an NN needs gradient calculation
+
+• Computation Graph
+   o to perform computation: topological traversal along the DAG
+
+• Auto Differentiation
+   o building backward computation graph for gradient calculation
+
+• Put together: Deep Learning Framework
+   1. Define program i.e., symbolic computation graph w/
+   placeholders/variable/operation nodes
+   2. Executes (optimized) computation graph on a set of available devices
+                                                                             2
+                     Today’s Topic
+• Encoder-decoder Architecture
+
+• Transformer Model
+  o Embedding
+  o Multihead Attention, Decoder Self-Attention
+  o FFN
+  o Layernorm
+
+• Training Techniques and Performance of Transformer
+
+• Code walkthrough
+                                                       3
+             Type of Language Models
+Encoder-only           Encoder-decoder        Decoder-only
+Masked LM                                     Autoregressive
+Non-autoregressive
+
+                                    Decoder
+ Encoder             Encoder                      Decoder
+
+e.g. BERT                 e.g. T5             e.g. GPT
+RoBERTa                                       LLaMA
+ESM (for protein)                             ProGen (for protein)
+
+                                                                4
+         Encoder-Decoder Paradigm
+
+              target:
+              I like singing and dancing.
+
+                    Decoder
+                                              𝑝𝜃 (𝑦|𝑥) = ∏𝑝(𝑦𝑖 |𝑥, 𝑦1:𝑖−1 )
+   Encoder                                                𝑖
+
+
+Source: 我喜欢唱歌和跳舞。
+                                            conditional prob. modeled by
+                                            neural networks (Transformer)
+                                                                              5
+                Sequence to Sequence Learning
+    • Conditional text generation: directly learning a function
+      mapping from source sequence to target sequence
+                     𝑝𝜃 (𝑦|𝑥) = ∏𝑝(𝑦𝑡 |𝑥, 𝑦1:𝑡−1 ; 𝜃)
+                                                      𝑡
+
+    • Previous encoder/decoder: LSTM or GRU
+                          Encoder                                 Target： 我            喜欢            跳舞     <eos>
+
+      RNN        RNN         RNN         RNN         RNN              RNN          RNN         RNN        RNN
+
+
+
+
+Source：     I      like        dancing    .           <eos>             <bos>           我        喜欢        跳舞
+                   Sutskever et al. Sequence to Sequence Learning with Neural Networks. 2014                        6
+     Motivation for a new Architecture
+• Full context and parallel: use Attention in both encoder and
+  decoder
+
+• no recurrent ==> concurrent encoding
+                                 target:
+                                 I like singing and dancing.
+
+                                       Decoder
+                  Encoder
+
+           Source: 我喜欢唱歌和跳舞。
+                                                                 7
+                     Today’s Topic
+• Encoder-decoder Architecture
+
+• Transformer Model
+  o Embedding
+  o Multihead Attention, Decoder Self-Attention
+  o FFN
+  o Layernorm
+
+• Training Techniques and Performance of Transformer
+
+• Code walkthrough
+                                                       8
+                        Transformer
+              Encoder                      Decoder
+                                      I like singing and
+                                          I
+                                      dancing.    like      singing
+
+                                       Softmax   Softmax   Softmax
+
+               MHA + FFN                MHA      MHA +     MHA +
+                                        +FFN      FFN       FFN
+
+
+                                       MHA +     MHA +     MHA +
+Token                                   FFN       FFN       FFN            Token
+Embedding                                                                  Embedding
+Table          MHA + FFN                                                   Table
+                                       MHA +     MHA +     MHA +
+                                        FFN       FFN       FFN
+
+
+
+
+我 一 和…               +pos emb                     I
+                                                           +pos emb
+                                                           like
+                                                                           I likeyou…
+                                        <BOS>
+
+
+            我喜欢 唱 歌 和 跳 舞 。
+                                                                                        9
+                                Vaswani et al. Attention is All You Need. 2017
+                       Embedding
+• Token Embedding: (tokenization next lec.)
+  o Shared (tied) input and output embedding from
+    lookup table
+
+• Positional Embedding:
+  o to distinguish words in different position, Map
+    position labels to embedding, dimension is same
+    as Tok Emb, for t-th pos, i-th dim
+                             𝑡
+            𝑃𝐸t,2𝑖 = sin(      2𝑖/𝑑
+                                    )
+                          1000
+                               𝑡
+           𝑃𝐸t,2𝑖+1 = cos(       2𝑖/𝑑
+                                      )               10
+               Multi-head Attention
+• Instead of one vector for each token
+
+• break into multiple heads                         Linear
+
+                                                    Concat
+
+
+
+• each head perform attention             Scaled Dot-Product
+                                          Attention
+                                                                        h
+
+
+                      𝑄
+Head𝑖 = Attention(𝑄𝑊𝑖 , 𝐾𝑊𝑖𝐾 , 𝑉𝑊𝑖𝑉 )     Linear   Linear      Linear
+
+                                            Q         K           V
+
+MultiHead(𝑄, 𝐾, 𝑉)
+= Concat(Head1 , Head2 , … , Headℎ )𝑊 𝑜
+
+
+                                                                            11
+                 Multi-head Attention
+ X are input embeddings from previous layer (num of tok * dim)
+                                sent len x sent len
+Query
+
+
+Key
+                                   len x dim
+
+Value
+                                   Q: why divided by sqrt(d)?
+
+                                Alammar, The Illustrated Transformer   12
+               Multihead Attention and FFN
+                                     (𝑄𝑥)𝑇 𝐾𝑥
+Attention(𝑄, 𝐾, 𝑉, 𝑥) = Softmax(                       ) ⋅ (𝑉𝑥)𝑇   FFN(𝑥) = 𝑚𝑎𝑥(0, 𝑥 ⋅ 𝑊1 + 𝑏1 ) ⋅ 𝑊2 + 𝑏2
+                                               𝑑
+                                                                                  Residual
+            MHA                                                        FFN      +
+                                                                                  Conn
+                                      LayerNorm
+                                     𝑥𝑖 − 𝜇(𝑥)
+                             𝑦𝑖 = 𝑤𝑖           + 𝑏𝑖
+                                        𝜎(𝑥)
+                                                                           LayerNorm
+                   (𝑄𝑥)𝑇 × 𝐾𝑥/ 𝑑𝑘
+                                                      Linear
+                                                                                 Linear
+           Softmax
+          Dot Product                          ×
+                                                                                  ReLU
+
+                     𝑄𝑥           𝐾𝑥                     𝑉𝑥        +             Linear
+
+                                                                                                       13
+             Decoder Self-Attention
+• Maskout right side before softmax (-inf)   Scaled Dot-Product Attention
+
+
+                                                         MatMul
+
+                                                    SoftMax
+
+                                                   Mask (opt.)
+
+                                                     Scale
+
+                                                    MatMul
+
+                                                     Q       K    V
+
+
+
+
+                                                                            14
+      Residual Connection and Layer
+              Normalization
+• Residual Connection
+
+• Make it zero mean and unit
+  variance within layer
+
+• Post-norm
+
+• Pre-norm
+
+
+
+                                      15
+                     Today’s Topic
+• Encoder-decoder Architecture
+
+• Transformer Model
+  o Embedding
+  o Multihead Attention, Decoder Self-Attention
+  o FFN
+  o Layernorm
+
+• Training Techniques and Performance of Transformer
+
+• Code walkthrough
+                                                       17
+           Transformer in Original Paper
+• C layers of encoder (=6)                   Output
+                                             Proba
+                                             bilities
+                                            Softmax                 Multi-Head                Scaled Dot-Product
+                                                                    Attention                 Attention
+
+• D layers of decoder (=6)
+                                            Linear
+                                                                      Linear                            MatMul
+                                            Add & Norm
+                                                                      Concat
+                                            Feed Forward                                          SoftMax
+
+                                            Add & Norm                                           Mask (opt.)
+                                                           Scaled Dot-Product
+
+• Token Embedding: 512
+                             Add & Norm
+                                                                                          h
+                                            Multi-Head     Attention
+                             Feed Forward   Attention
+                                                                                                   Scale
+
+
+  (base), 1024 (large)                                     Linear    Linear      Linear
+                                            Add & Norm
+                             Add & Norm                                                           MatMul
+                                            Masked
+                             Multi-Head     Multi-Head                  K           V
+                             Attention      Attention
+                                                             Q
+                                                                                                   Q       K   V
+
+
+
+• FFN dim=2048               Input
+                             Embedding
+                                            Output
+                                            Embedding
+
+
+                               Inputs        Output
+                                             s
+                                             (shifted
+                                             right)
+
+
+
+
+                                                                                                                   18
+                Training Transformer
+      𝑃(𝑌|𝑋) = ∏𝑃(𝑦𝑡 |𝑦<𝑡 , 𝑥)
+
+• Training loss: Cross-Entropy
+                                                      target:
+ 𝑙 = −∑∑log𝑓𝜃 (𝑥𝑛 , 𝑦𝑛,1 , … , 𝑦𝑛,𝑡−1 )               I like singing and dancing
+        𝑛 𝑡
+                                                             Decoder
+• Teacher-forcing during training.
+                                            Encoder
+• pretend to know groundtruth for
+                                          Source: 我喜欢唱歌和跳舞。
+  prefix
+
+                                                                            19
+         Training Transformer for MT
+• Dropout
+  o Applied to before residual
+  o and to embedding, pos emb.
+  o p=0.1 ~ 0.3
+
+• Label smoothing
+  o 0.1 probability assigned to non-truth
+
+• Vocabulary:
+  o En-De: 37K using BPE
+  o En-Fr: 32k word-piece (similar to BPE)   20
+                  Label Smoothing
+• Assume 𝑦 ∈ 𝑅 𝑛 is the one-hot encoding of label
+                        1 if belongs to class 𝑖
+                  𝑦𝑖 = {
+                        0      otherwise
+
+
+• Approximating 0/1 values with softmax is hard
+
+• The smoothed version
+                       1−𝜖     if belongs to class 𝑖
+               𝑦𝑖 = {
+                     𝜖/(𝑛 − 1)       otherwise
+  o Commonly use 𝜖 = 0.1
+
+
+                                                       21
+                                 Training
+• Batch
+  o group by approximate sentence length
+  o still need shufflingHardware
+  o one machine with 8 GPUs (in 2017 paper)
+  o base model: 100k steps (12 hours)
+  o large model: 300k steps (3.5 days)
+
+• Adam Optimizer
+  o increase learning rate during warmup, then decrease
+          1       1    𝑡
+  o𝜂=         𝑚𝑖𝑛( ,         )
+          𝑑       𝑡
+                       𝑡03
+
+
+
+                                                          22
+                               ADAM
+  𝑚𝑡+1 = 𝛽1 𝑚𝑡 − (1 − 𝛽1 )𝛻ℓ(𝑥𝑡 )
+𝑣𝑡+1 = 𝛽2 𝑣𝑡 + (1 − 𝛽2 )(𝛻ℓ(𝑥𝑡 ))2
+           𝑚𝑡+1
+𝑚ෝ 𝑡+1 =
+         1 − 𝛽1𝑡+1
+          𝑣𝑡+1
+𝑣ො𝑡+1 =
+        1 − 𝛽2𝑡+1
+                  𝜂
+𝑥𝑡+1 = 𝑥𝑡 −              𝑚
+                         ෝ 𝑡+1
+               𝑣ො𝑡+1 + 𝜖
+                    Model Average
+• A single model obtained by averaging the last 5
+  checkpoints, which were written at 10-minute interval
+  (base)
+
+• decoding length: within source length + 50
+  o more on decoding in next lecture
+
+
+
+
+                                                          24
+                          Summary
+• Sequence-to-sequence encoder-decoder framework for
+  conditional generation, including Machine Translation
+
+• Key components in Transformer (why each?)
+  o Positional Embedding (to distinguish tokens at different pos)
+  o Multihead attention
+  o Residual connection
+  o layer norm
+  o FFN
+
+                                                                    25
+                 Code Go-through
+https://nlp.seas.harvard.edu/annotated-transformer/
+
+
+
+
+                                                      26
+

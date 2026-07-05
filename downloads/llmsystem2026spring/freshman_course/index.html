@@ -1,0 +1,1064 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LLM 系统入门互动课堂</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #607089;
+      --line: #d8e0ec;
+      --blue: #2563eb;
+      --green: #15803d;
+      --amber: #b45309;
+      --red: #b91c1c;
+      --cyan: #0e7490;
+      --violet: #6d28d9;
+      --soft-blue: #eaf1ff;
+      --soft-green: #e9f7ef;
+      --soft-amber: #fff4df;
+      --shadow: 0 10px 28px rgba(23, 32, 51, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+
+    a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 290px minmax(0, 1fr) 330px;
+    }
+
+    .sidebar,
+    .inspector {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      background: #fbfcfe;
+      border-color: var(--line);
+    }
+
+    .sidebar {
+      border-right: 1px solid var(--line);
+      padding: 20px 16px;
+    }
+
+    .inspector {
+      border-left: 1px solid var(--line);
+      padding: 18px 16px;
+    }
+
+    main {
+      padding: 22px 24px 36px;
+      min-width: 0;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .brand-mark {
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: #172033;
+      color: #fff;
+      font-weight: 800;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.25;
+    }
+
+    .brand p {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .nav-group {
+      margin: 18px 0;
+    }
+
+    .nav-title {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .module-nav {
+      display: grid;
+      gap: 7px;
+    }
+
+    .nav-btn,
+    .chip,
+    .icon-btn,
+    .quiz-option {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      transition: border-color .15s, background .15s, transform .15s;
+    }
+
+    .nav-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      text-align: left;
+    }
+
+    .nav-btn:hover,
+    .chip:hover,
+    .icon-btn:hover,
+    .quiz-option:hover {
+      border-color: #9db4d6;
+      background: #f8fbff;
+    }
+
+    .nav-btn.active {
+      border-color: var(--blue);
+      background: var(--soft-blue);
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      flex: 0 0 auto;
+      background: var(--blue);
+    }
+
+    .hero {
+      background: #172033;
+      color: #fff;
+      border-radius: 8px;
+      padding: 22px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(260px, .9fr);
+      gap: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero h2 {
+      margin: 0 0 10px;
+      font-size: clamp(26px, 4vw, 44px);
+      line-height: 1.05;
+    }
+
+    .hero p {
+      color: #cbd5e1;
+      margin: 0 0 16px;
+      line-height: 1.75;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .stat {
+      border: 1px solid rgba(255, 255, 255, .18);
+      border-radius: 8px;
+      padding: 10px;
+      background: rgba(255, 255, 255, .06);
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 22px;
+    }
+
+    .stat span {
+      color: #cbd5e1;
+      font-size: 12px;
+    }
+
+    .flow {
+      min-height: 250px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, .18);
+      background: #0f172a;
+      padding: 14px;
+      display: grid;
+      align-content: center;
+      gap: 10px;
+    }
+
+    .flow-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    .flow-card {
+      border: 1px solid rgba(255, 255, 255, .18);
+      border-radius: 8px;
+      padding: 10px;
+      background: rgba(255, 255, 255, .08);
+      min-height: 86px;
+    }
+
+    .flow-card b {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 14px;
+    }
+
+    .flow-card span {
+      display: block;
+      color: #cbd5e1;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin: 18px 0 14px;
+    }
+
+    .chip {
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 13px;
+    }
+
+    .chip.active {
+      border-color: var(--blue);
+      background: var(--soft-blue);
+      color: #1d4ed8;
+    }
+
+    .search {
+      flex: 1 1 240px;
+      min-width: 170px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 11px;
+      background: #fff;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .section {
+      margin-top: 18px;
+    }
+
+    .section h3 {
+      margin: 0 0 10px;
+      font-size: 20px;
+    }
+
+    .module-card,
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .module-card {
+      display: grid;
+      gap: 12px;
+      padding: 16px;
+      min-height: 260px;
+    }
+
+    .module-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .module-card h4 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .module-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #0f172a;
+      background: #e5e7eb;
+      white-space: nowrap;
+    }
+
+    .tag.core { background: var(--soft-blue); color: #1d4ed8; }
+    .tag.compute { background: var(--soft-green); color: #166534; }
+    .tag.scale { background: #f0eaff; color: var(--violet); }
+    .tag.infer { background: #e6f7fb; color: var(--cyan); }
+    .tag.practice { background: var(--soft-amber); color: var(--amber); }
+
+    .mini-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .mini-list li {
+      display: flex;
+      gap: 8px;
+      line-height: 1.5;
+      color: #30405a;
+    }
+
+    .mini-list li::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      margin-top: .72em;
+      border-radius: 50%;
+      background: var(--blue);
+      flex: 0 0 auto;
+    }
+
+    .resources {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .pdf-link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 6px 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .panel {
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+
+    .panel h3 {
+      margin: 0 0 10px;
+      font-size: 17px;
+    }
+
+    .progress {
+      height: 10px;
+      background: #e5eaf2;
+      border-radius: 999px;
+      overflow: hidden;
+      margin: 8px 0 10px;
+    }
+
+    .progress div {
+      height: 100%;
+      width: 0;
+      background: var(--green);
+      transition: width .2s;
+    }
+
+    .check-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 7px 0;
+      color: #30405a;
+      line-height: 1.4;
+    }
+
+    .check-row input {
+      width: 17px;
+      height: 17px;
+      accent-color: var(--green);
+      flex: 0 0 auto;
+    }
+
+    .glossary-item {
+      border-top: 1px solid var(--line);
+      padding: 10px 0;
+    }
+
+    .glossary-item:first-of-type {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    .glossary-item b {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .glossary-item span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .simulator {
+      display: grid;
+      grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .sim-controls {
+      display: grid;
+      gap: 12px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+
+    .slider-row {
+      display: grid;
+      gap: 5px;
+    }
+
+    .slider-row label {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13px;
+      color: #30405a;
+    }
+
+    .sim-output {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .meter {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fff;
+    }
+
+    .meter strong {
+      display: block;
+      font-size: 24px;
+      margin-bottom: 4px;
+    }
+
+    .meter span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .quiz-question {
+      margin: 0 0 10px;
+      line-height: 1.55;
+    }
+
+    .quiz-options {
+      display: grid;
+      gap: 8px;
+    }
+
+    .quiz-option {
+      width: 100%;
+      text-align: left;
+      border-radius: 8px;
+      padding: 9px 10px;
+    }
+
+    .quiz-option.correct {
+      border-color: #22c55e;
+      background: #ecfdf3;
+    }
+
+    .quiz-option.wrong {
+      border-color: #ef4444;
+      background: #fff1f1;
+    }
+
+    .feedback {
+      min-height: 42px;
+      margin-top: 10px;
+      color: var(--muted);
+      line-height: 1.55;
+      font-size: 13px;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 10px;
+    }
+
+    .timeline-step {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+    }
+
+    .step-num {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: #172033;
+      color: #fff;
+      font-weight: 800;
+      font-size: 13px;
+    }
+
+    .timeline-step b {
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    .timeline-step span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .empty {
+      padding: 18px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      background: #fff;
+    }
+
+    @media (max-width: 1180px) {
+      .app {
+        grid-template-columns: 240px minmax(0, 1fr);
+      }
+
+      .inspector {
+        position: static;
+        height: auto;
+        grid-column: 1 / -1;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .panel {
+        margin-bottom: 0;
+      }
+    }
+
+    @media (max-width: 860px) {
+      .app {
+        display: block;
+      }
+
+      .sidebar,
+      .inspector {
+        position: static;
+        height: auto;
+      }
+
+      .sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      main {
+        padding: 16px;
+      }
+
+      .hero,
+      .simulator,
+      .grid,
+      .inspector {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-row,
+      .stats,
+      .sim-output {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">LLM</div>
+        <div>
+          <h1>系统入门互动课堂</h1>
+          <p>面向大学新生的 90 分钟导学页</p>
+        </div>
+      </div>
+
+      <div class="nav-group">
+        <p class="nav-title">学习模块</p>
+        <div class="module-nav" id="moduleNav"></div>
+      </div>
+
+      <div class="nav-group">
+        <p class="nav-title">课堂目标</p>
+        <label class="check-row"><input type="checkbox" data-goal> 说清楚 LLM 从文字到回答的流程</label>
+        <label class="check-row"><input type="checkbox" data-goal> 理解 GPU 为什么适合深度学习</label>
+        <label class="check-row"><input type="checkbox" data-goal> 能区分训练、微调、推理和服务</label>
+        <label class="check-row"><input type="checkbox" data-goal> 知道性能优化在优化什么</label>
+        <div class="progress" aria-label="学习目标完成度"><div id="goalProgress"></div></div>
+      </div>
+    </aside>
+
+    <main>
+      <section class="hero" id="top">
+        <div>
+          <h2>从“会聊天的模型”到“能运行的系统”</h2>
+          <p>
+            这份页面把 11868 LLM Systems 的课件内容重组为新生友好的路径：
+            先看输入如何变成 token，再看 Transformer 如何计算，最后通过中文导学文档理解 GPU、分布式训练和在线服务。
+          </p>
+          <div class="stats">
+            <div class="stat"><strong>28</strong><span>份课件被抽取整理</span></div>
+            <div class="stat"><strong>6</strong><span>个入门学习模块</span></div>
+            <div class="stat"><strong>12</strong><span>个核心术语</span></div>
+          </div>
+        </div>
+        <div class="flow" aria-label="LLM 系统流程图">
+          <div class="flow-row">
+            <div class="flow-card"><b>文本输入</b><span>一句话先被拆成 token，模型只处理数字编号。</span></div>
+            <div class="flow-card"><b>向量表示</b><span>embedding 把 token 放到可计算的空间里。</span></div>
+            <div class="flow-card"><b>Transformer</b><span>注意力层在上下文中寻找相关信息。</span></div>
+            <div class="flow-card"><b>输出服务</b><span>推理系统逐 token 生成，并管理延迟和吞吐。</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="toolbar" aria-label="筛选课程模块">
+          <button class="chip active" data-filter="all">全部</button>
+          <button class="chip" data-filter="core">模型基础</button>
+          <button class="chip" data-filter="compute">计算基础</button>
+          <button class="chip" data-filter="scale">训练扩展</button>
+          <button class="chip" data-filter="infer">推理服务</button>
+          <input class="search" id="searchBox" type="search" placeholder="搜索 token、GPU、量化、vLLM...">
+        </div>
+        <div class="grid" id="moduleGrid"></div>
+      </section>
+
+      <section class="section">
+        <h3>把系统想成一条流水线</h3>
+        <div class="simulator">
+          <div class="sim-controls">
+            <div class="slider-row">
+              <label for="seqLen">上下文长度 <b><span id="seqLenValue">2048</span> tokens</b></label>
+              <input id="seqLen" type="range" min="512" max="8192" step="512" value="2048">
+            </div>
+            <div class="slider-row">
+              <label for="batchSize">并发请求 <b><span id="batchSizeValue">8</span> 个</b></label>
+              <input id="batchSize" type="range" min="1" max="64" step="1" value="8">
+            </div>
+            <div class="slider-row">
+              <label for="bits">权重量化 <b><span id="bitsValue">16</span> bit</b></label>
+              <input id="bits" type="range" min="4" max="16" step="4" value="16">
+            </div>
+          </div>
+          <div class="sim-output">
+            <div class="meter"><strong id="attentionCost">4.2x</strong><span>注意力计算压力。上下文越长，注意力越容易成为瓶颈。</span></div>
+            <div class="meter"><strong id="memoryCost">1.0x</strong><span>模型权重内存。量化会降低内存，但要考虑精度和速度。</span></div>
+            <div class="meter"><strong id="throughputHint">中</strong><span>吞吐趋势。并发能提高 GPU 利用率，但会增加排队和缓存压力。</span></div>
+            <div class="meter"><strong id="lessonHint">先测量</strong><span>系统优化不是猜测，先找到瓶颈，再选择 FlashAttention、vLLM、量化等方法。</span></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="inspector">
+      <section class="panel">
+        <h3>推荐课堂节奏</h3>
+        <div class="timeline">
+          <div class="timeline-step"><div class="step-num">1</div><div><b>10 分钟</b><span>用流程图建立全局图景：输入、模型、硬件、服务。</span></div></div>
+          <div class="timeline-step"><div class="step-num">2</div><div><b>25 分钟</b><span>讲 token、embedding、attention 和 Transformer。</span></div></div>
+          <div class="timeline-step"><div class="step-num">3</div><div><b>25 分钟</b><span>用 GPU、并行和显存解释系统约束。</span></div></div>
+          <div class="timeline-step"><div class="step-num">4</div><div><b>20 分钟</b><span>用推理服务例子讨论延迟、吞吐、KV cache。</span></div></div>
+          <div class="timeline-step"><div class="step-num">5</div><div><b>10 分钟</b><span>完成小测并打开课件继续自学。</span></div></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>核心术语</h3>
+        <div id="glossary"></div>
+      </section>
+
+      <section class="panel">
+        <h3>小测</h3>
+        <p class="quiz-question" id="quizQuestion"></p>
+        <div class="quiz-options" id="quizOptions"></div>
+        <div class="feedback" id="quizFeedback"></div>
+      </section>
+    </aside>
+  </div>
+
+  <script>
+    const lessonDocs = {
+      "llmsys-01-intro-14e74a426e4a7e3ed485a026e1f65b70.pdf": "modules/01-llm-system-overview.html",
+      "llmsys-02-gpu-programming-c64a0141b96a1f384db7f6717ed8e039.pdf": "modules/02-gpu-programming-basics-1.html",
+      "llmsys-03-gpu-programming2-b82b6ffdf554494747d00ce7ac606c3b.pdf": "modules/03-gpu-programming-basics-2.html",
+      "llmsys-04-gpu-acceleration-48ffa5768ba62c54138f0a71ca2b68b8.pdf": "modules/04-gpu-acceleration.html",
+      "llmsys-05-dlframework-fa0770d636572de3f7b48ccae0ba8848.pdf": "modules/05-deep-learning-frameworks-autodiff.html",
+      "llmsys-06-transformer-14bd7575a2f6c8bac60522354c11d691.pdf": "modules/06-transformer.html",
+      "llmsys-07-llms-acf5db9438a8d9a86f86d29d9c563c00.pdf": "modules/07-pretrained-llms.html",
+      "llmsys-08-tokenization-594dd043d7a87d8dcc91b7e7585a0e34.pdf": "modules/08-tokenization-embedding.html",
+      "llmsys-09-decoding-cac2cd9402765ff5e6c24f7baffd321c.pdf": "modules/09-decoding-generation.html",
+      "llmsys-10-transformer-acc-5ba466406bf7296f86cd244ad0405867.pdf": "modules/10-transformer-acceleration.html",
+      "llmsys-12-Introduction_to_JAX_XLA_TPU-f0450caf9e7e6707c009f7f77997a2be.pdf": "modules/12-jax-xla-tpu.html",
+      "llmsys-13-pallas_splash_attention_srinath_mandalapu-b0bc7990950b84561ff9aa8e1791f727.pdf": "modules/13-pallas-kernels.html",
+      "llmsys-14-distributed-training-b27c3d1dc185e680c6f5cc924e9ec9d7.pdf": "modules/14-distributed-training.html",
+      "llmsys-15-ddp-165dbe3873fac21eb8b339e64bcfee28.pdf": "modules/15-distributed-data-parallel.html",
+      "llmsys-16-model-parallel-83b41612547620ee0e172caa1ee448ed.pdf": "modules/16-model-parallel-training.html",
+      "llmsys-17-MoE-3aa3125f9ccdd4bb7109ef077fbe9260.pdf": "modules/17-mixture-of-experts.html",
+      "llmsys-18-zero-20eb6c8d8c1e7092e1b922abf03d8cdd.pdf": "modules/18-zero-memory-optimization.html",
+      "llmsys-19-quantization-da7a2abad092c802b03672ce1cc7bee9.pdf": "modules/19-llm-quantization.html",
+      "llmsys-20-quantization2-ba573d7e5d82e68027bbd3a92c3cd819.pdf": "modules/20-gptq-quantization.html",
+      "llmsys-21-FlashAttention_tridao2026.4-50476379a6127697ae7fbf974ad28348.pdf": "modules/21-flashattention.html",
+      "llmsys-22-llm-serving-scheduler-radixattention-dfa87a4515092525676277a85bc4425d.pdf": "modules/22-llm-serving-sglang.html",
+      "llmsys-23-peft-791e97c5520e2ea7491153b45a923ac7.pdf": "modules/23-parameter-efficient-finetuning.html",
+      "llmsys-24-vLLM_woosuk_kwon-b6a0750bb310949461ba5a635a1126eb.pdf": "modules/24-vllm-paged-attention.html",
+      "llmsys-26-dynamo-vikram_mailthody-0ddbeb69382d5c168b6d4636a82185d0.pdf": "modules/26-inference-at-scale.html",
+      "llmsys-27-LMCache_junchenjiang-c21828fe582270cb5e08b4a21a002956.pdf": "modules/27-lmcache.html",
+      "llmsys-28-mooncake-kTransformer-1243bfbecbb0c3610bf95eac030acb2a.pdf": "modules/28-heterogeneous-serving.html",
+      "llmsys-29-disaggregating_prefill_decode_hao_zhang-c0e55139d20512a2348783423397cc7f.pdf": "modules/29-disaggregated-prefill-decode.html",
+      "llmsys-30-serving-c4a70ab21cde01fb60068a256c6e163a.pdf": "modules/30-serving-stack.html"
+    };
+
+    const modules = [
+      {
+        id: "overview",
+        tag: "core",
+        title: "1. LLM 系统全景",
+        source: "llmsys-01",
+        summary: "LLM 系统不是只有模型本身，还包括数据表示、训练框架、硬件、推理服务和评测反馈。新生先建立地图，再进入细节。",
+        bullets: ["模型负责从上下文预测下一个 token", "系统负责让模型可训练、可部署、可扩展", "性能目标通常是更低延迟、更高吞吐、更低成本"],
+        pdfs: ["llmsys-01-intro-14e74a426e4a7e3ed485a026e1f65b70.pdf"]
+      },
+      {
+        id: "gpu",
+        tag: "compute",
+        title: "2. GPU 与并行计算",
+        source: "llmsys-02, 03, 04",
+        summary: "GPU 擅长同时执行大量相似计算。深度学习中的矩阵乘法、卷积和 attention 都能受益于这种并行结构。",
+        bullets: ["线程、block、memory hierarchy 是 GPU 编程基础", "性能常受访存、并行度和同步开销影响", "理解硬件有助于看懂后续优化方法"],
+        pdfs: [
+          "llmsys-02-gpu-programming-c64a0141b96a1f384db7f6717ed8e039.pdf",
+          "llmsys-03-gpu-programming2-b82b6ffdf554494747d00ce7ac606c3b.pdf",
+          "llmsys-04-gpu-acceleration-48ffa5768ba62c54138f0a71ca2b68b8.pdf"
+        ]
+      },
+      {
+        id: "model",
+        tag: "core",
+        title: "3. 从 Token 到 Transformer",
+        source: "llmsys-05, 06, 07, 08, 09",
+        summary: "文本先被 tokenization 变成离散编号，再进入 embedding 和 Transformer。生成时，模型反复采样下一个 token。",
+        bullets: ["自动微分让训练可以从损失函数反向更新参数", "注意力机制让模型按上下文分配信息权重", "采样策略会影响回答的稳定性和多样性"],
+        pdfs: [
+          "llmsys-05-dlframework-fa0770d636572de3f7b48ccae0ba8848.pdf",
+          "llmsys-06-transformer-14bd7575a2f6c8bac60522354c11d691.pdf",
+          "llmsys-07-llms-acf5db9438a8d9a86f86d29d9c563c00.pdf",
+          "llmsys-08-tokenization-594dd043d7a87d8dcc91b7e7585a0e34.pdf",
+          "llmsys-09-decoding-cac2cd9402765ff5e6c24f7baffd321c.pdf"
+        ]
+      },
+      {
+        id: "kernels",
+        tag: "compute",
+        title: "4. 加速核心算子",
+        source: "llmsys-10, 12, 13, 21",
+        summary: "当模型结构固定后，系统优化会盯住最耗时的算子和内存访问。FlashAttention、Pallas、TPU/XLA 都是在减少浪费。",
+        bullets: ["attention 的核心挑战是计算量和中间结果内存", "编译器和专用 kernel 可以把抽象模型映射到硬件", "优化要兼顾正确性、可维护性和实际速度"],
+        pdfs: [
+          "llmsys-10-transformer-acc-5ba466406bf7296f86cd244ad0405867.pdf",
+          "llmsys-12-Introduction_to_JAX_XLA_TPU-f0450caf9e7e6707c009f7f77997a2be.pdf",
+          "llmsys-13-pallas_splash_attention_srinath_mandalapu-b0bc7990950b84561ff9aa8e1791f727.pdf",
+          "llmsys-21-FlashAttention_tridao2026.4-50476379a6127697ae7fbf974ad28348.pdf"
+        ]
+      },
+      {
+        id: "training",
+        tag: "scale",
+        title: "5. 大模型训练如何扩展",
+        source: "llmsys-14 至 18",
+        summary: "单卡放不下或训不动时，需要把数据、模型、流水线和优化器状态分散到多张卡或多台机器上。",
+        bullets: ["DDP 复制模型，用不同数据并行训练", "模型并行把一个模型切到多张卡上", "ZeRO 和 MoE 关注显存与计算资源的分配"],
+        pdfs: [
+          "llmsys-14-distributed-training-b27c3d1dc185e680c6f5cc924e9ec9d7.pdf",
+          "llmsys-15-ddp-165dbe3873fac21eb8b339e64bcfee28.pdf",
+          "llmsys-16-model-parallel-83b41612547620ee0e172caa1ee448ed.pdf",
+          "llmsys-17-MoE-3aa3125f9ccdd4bb7109ef077fbe9260.pdf",
+          "llmsys-18-zero-20eb6c8d8c1e7092e1b922abf03d8cdd.pdf"
+        ]
+      },
+      {
+        id: "serving",
+        tag: "infer",
+        title: "6. 推理、微调与在线服务",
+        source: "llmsys-19 至 30",
+        summary: "部署 LLM 时，重点从训练速度转向用户等待时间、吞吐、显存和服务稳定性。量化、PEFT、KV cache、vLLM 都服务于这些目标。",
+        bullets: ["量化用更少 bit 表示权重，降低显存压力", "PEFT 只训练少量参数，降低微调成本", "服务系统要管理请求调度、KV cache 和异构硬件"],
+        pdfs: [
+          "llmsys-19-quantization-da7a2abad092c802b03672ce1cc7bee9.pdf",
+          "llmsys-20-quantization2-ba573d7e5d82e68027bbd3a92c3cd819.pdf",
+          "llmsys-22-llm-serving-scheduler-radixattention-dfa87a4515092525676277a85bc4425d.pdf",
+          "llmsys-23-peft-791e97c5520e2ea7491153b45a923ac7.pdf",
+          "llmsys-24-vLLM_woosuk_kwon-b6a0750bb310949461ba5a635a1126eb.pdf",
+          "llmsys-26-dynamo-vikram_mailthody-0ddbeb69382d5c168b6d4636a82185d0.pdf",
+          "llmsys-27-LMCache_junchenjiang-c21828fe582270cb5e08b4a21a002956.pdf",
+          "llmsys-28-mooncake-kTransformer-1243bfbecbb0c3610bf95eac030acb2a.pdf",
+          "llmsys-29-disaggregating_prefill_decode_hao_zhang-c0e55139d20512a2348783423397cc7f.pdf",
+          "llmsys-30-serving-c4a70ab21cde01fb60068a256c6e163a.pdf"
+        ]
+      }
+    ];
+
+    const glossary = [
+      ["Token", "模型处理文字的基本单位，可能是一个词、一个字或一个子词片段。"],
+      ["Embedding", "把 token 编号变成向量，让模型能用数学运算处理语义和位置。"],
+      ["Attention", "让每个位置根据上下文选择更相关的信息，是 Transformer 的核心。"],
+      ["GPU Kernel", "在 GPU 上执行的小程序，决定一个算子如何并行计算。"],
+      ["Batch", "一次送进模型的一组样本或请求，影响吞吐和显存。"],
+      ["KV Cache", "推理时保存历史 key/value，避免每生成一个 token 都重复算完整上下文。"],
+      ["Quantization", "用更少位数表示参数或激活，常用于降低显存和带宽需求。"],
+      ["DDP", "数据并行训练方法，多张卡各自看不同数据，再同步梯度。"],
+      ["Model Parallel", "把同一个大模型拆到多张卡上计算。"],
+      ["MoE", "Mixture-of-Experts，让每个 token 只激活部分专家模型以扩大容量。"],
+      ["PEFT", "参数高效微调，只更新少量新增或适配参数。"],
+      ["Throughput", "单位时间完成的 token 或请求数量，是服务系统的重要指标。"]
+    ];
+
+    const quiz = [
+      {
+        q: "为什么 LLM 系统课要先讲 GPU？",
+        options: ["因为训练和推理主要受大规模矩阵计算与显存访问限制", "因为 GPU 会自动理解自然语言", "因为 CPU 不能运行任何神经网络"],
+        answer: 0,
+        explain: "GPU 的价值来自并行计算和高带宽内存，不是因为它懂语言。"
+      },
+      {
+        q: "KV cache 主要解决什么问题？",
+        options: ["减少生成阶段对历史上下文的重复计算", "把英文自动翻译成中文", "让模型参数永久变少"],
+        answer: 0,
+        explain: "推理逐 token 生成时，缓存历史 key/value 能降低重复计算。"
+      },
+      {
+        q: "量化通常优先改善哪类资源压力？",
+        options: ["显存和内存带宽", "数据标注质量", "网络安全权限"],
+        answer: 0,
+        explain: "更低 bit 表示可以减少权重占用，但需要检查精度和硬件支持。"
+      }
+    ];
+
+    const tagNames = {
+      core: "模型基础",
+      compute: "计算基础",
+      scale: "训练扩展",
+      infer: "推理服务",
+      practice: "实践"
+    };
+
+    let activeFilter = "all";
+    let currentQuiz = 0;
+
+    const moduleGrid = document.querySelector("#moduleGrid");
+    const moduleNav = document.querySelector("#moduleNav");
+    const searchBox = document.querySelector("#searchBox");
+
+    function renderModules() {
+      const query = searchBox.value.trim().toLowerCase();
+      const filtered = modules.filter(module => {
+        const text = [module.title, module.summary, module.source, module.bullets.join(" "), module.pdfs.join(" ")].join(" ").toLowerCase();
+        return (activeFilter === "all" || module.tag === activeFilter) && (!query || text.includes(query));
+      });
+
+      moduleGrid.innerHTML = filtered.length ? filtered.map(module => `
+        <article class="module-card" id="${module.id}">
+          <div class="module-head">
+            <div>
+              <h4>${module.title}</h4>
+              <p>${module.summary}</p>
+            </div>
+            <span class="tag ${module.tag}">${tagNames[module.tag]}</span>
+          </div>
+          <ul class="mini-list">
+            ${module.bullets.map(item => `<li>${item}</li>`).join("")}
+          </ul>
+          <div class="resources">
+            <span class="tag practice">${module.source}</span>
+            ${module.pdfs.map((pdf, index) => {
+              const docHref = lessonDocs[pdf];
+              return docHref
+                ? `<a class="pdf-link" href="./${docHref}" target="_blank" rel="noopener">文档 ${index + 1}</a>`
+                : `<a class="pdf-link" href="../source_pdfs/${pdf}" target="_blank" rel="noopener">原始 PDF ${index + 1}</a>`;
+            }).join("")}
+          </div>
+        </article>
+      `).join("") : `<div class="empty">没有匹配的模块。换一个关键词试试。</div>`;
+
+      document.querySelectorAll(".nav-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.target === (filtered[0] && filtered[0].id));
+      });
+    }
+
+    function renderNav() {
+      moduleNav.innerHTML = modules.map(module => `
+        <button class="nav-btn" data-target="${module.id}">
+          <span class="dot" style="background:${tagColor(module.tag)}"></span>
+          <span>${module.title.replace(/^[0-9]+\.\s*/, "")}</span>
+        </button>
+      `).join("");
+
+      document.querySelectorAll(".nav-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          activeFilter = "all";
+          document.querySelectorAll(".chip").forEach(chip => chip.classList.toggle("active", chip.dataset.filter === "all"));
+          searchBox.value = "";
+          renderModules();
+          requestAnimationFrame(() => document.getElementById(btn.dataset.target)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+        });
+      });
+    }
+
+    function tagColor(tag) {
+      return { core: "#2563eb", compute: "#15803d", scale: "#6d28d9", infer: "#0e7490" }[tag] || "#b45309";
+    }
+
+    function renderGlossary() {
+      document.querySelector("#glossary").innerHTML = glossary.map(([term, desc]) => `
+        <div class="glossary-item"><b>${term}</b><span>${desc}</span></div>
+      `).join("");
+    }
+
+    function renderQuiz() {
+      const item = quiz[currentQuiz];
+      document.querySelector("#quizQuestion").textContent = `${currentQuiz + 1}. ${item.q}`;
+      document.querySelector("#quizOptions").innerHTML = item.options.map((option, index) => `
+        <button class="quiz-option" data-index="${index}">${option}</button>
+      `).join("");
+      document.querySelector("#quizFeedback").textContent = "选择一个答案。";
+      document.querySelectorAll(".quiz-option").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const chosen = Number(btn.dataset.index);
+          document.querySelectorAll(".quiz-option").forEach(option => option.disabled = true);
+          btn.classList.add(chosen === item.answer ? "correct" : "wrong");
+          document.querySelectorAll(".quiz-option")[item.answer].classList.add("correct");
+          document.querySelector("#quizFeedback").innerHTML = `${chosen === item.answer ? "正确。" : "再想想。"}${item.explain}<br><button class="chip" id="nextQuiz">${currentQuiz === quiz.length - 1 ? "重新开始" : "下一题"}</button>`;
+          document.querySelector("#nextQuiz").addEventListener("click", () => {
+            currentQuiz = (currentQuiz + 1) % quiz.length;
+            renderQuiz();
+          });
+        });
+      });
+    }
+
+    function updateGoals() {
+      const goals = [...document.querySelectorAll("[data-goal]")];
+      const done = goals.filter(goal => goal.checked).length;
+      document.querySelector("#goalProgress").style.width = `${Math.round(done / goals.length * 100)}%`;
+    }
+
+    function updateSimulator() {
+      const seq = Number(document.querySelector("#seqLen").value);
+      const batch = Number(document.querySelector("#batchSize").value);
+      const bits = Number(document.querySelector("#bits").value);
+      document.querySelector("#seqLenValue").textContent = seq;
+      document.querySelector("#batchSizeValue").textContent = batch;
+      document.querySelector("#bitsValue").textContent = bits;
+
+      const attention = (seq / 1024) * (seq / 1024) * Math.max(1, batch / 8);
+      const memory = bits / 16;
+      document.querySelector("#attentionCost").textContent = `${attention.toFixed(1)}x`;
+      document.querySelector("#memoryCost").textContent = `${memory.toFixed(2)}x`;
+      document.querySelector("#throughputHint").textContent = batch < 8 ? "偏低" : batch < 32 ? "中" : "较高";
+      document.querySelector("#lessonHint").textContent = seq >= 4096 ? "关注 attention" : bits <= 8 ? "关注精度" : "先测量";
+    }
+
+    document.querySelectorAll(".chip[data-filter]").forEach(chip => {
+      chip.addEventListener("click", () => {
+        activeFilter = chip.dataset.filter;
+        document.querySelectorAll(".chip[data-filter]").forEach(item => item.classList.toggle("active", item === chip));
+        renderModules();
+      });
+    });
+
+    searchBox.addEventListener("input", renderModules);
+    document.querySelectorAll("[data-goal]").forEach(goal => goal.addEventListener("change", updateGoals));
+    ["seqLen", "batchSize", "bits"].forEach(id => document.getElementById(id).addEventListener("input", updateSimulator));
+
+    renderNav();
+    renderModules();
+    renderGlossary();
+    renderQuiz();
+    updateGoals();
+    updateSimulator();
+  </script>
+</body>
+</html>

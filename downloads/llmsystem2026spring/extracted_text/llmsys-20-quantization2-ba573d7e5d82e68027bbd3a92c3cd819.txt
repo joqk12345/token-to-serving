@@ -1,0 +1,500 @@
+LLM Quantization - GPTQ
+
+                          Lei Li
+
+
+
+  Ack: Kath Choi, Aashiq Muhamed, Zhen Wu, Hongyi Jin, Wayne Wang
+ Recap of Basic Quantization Methods
+• low-bit number representation in computer
+  o BF16: 16-bit half precision floating point numbers, better for ML tasks
+  o int8
+
+• Direct quantization of numbers
+  o absmax: linearly scale according to max abs value
+  o zero-point: finding zero-point and scale
+
+• Layer-wise quantization approaches for NN weights
+  o AdaQuant
+  o KD: ZeroQuant
+  o LLM.int8(): mixed strategy for 8-bit quantization and 16-bit (for outliers)   2
+        Quantize a Number to Int8
+• Absmax quant       • Zero-point quant
+
+
+
+
+                                          4
+                          GPTQ
+• Goal: quantization for very large models while maintain
+  accuracy
+
+
+
+
+                                                            5
+                                   Overall idea of GPTQ
+   •     Revisit layer-wise quantization of weight matrices
+                                                                                           2
+                                                                ෡
+                                                    argmin 𝑊𝑋 − 𝑊𝑋
+                                                         ෡         2
+                                                         𝑊
+
+
+   X: input data to current layer (d x Len)                                                      W: projection matrix
+
+   •     Key ideas:
+       1.    Quantizes one column-block of weights at a time
+       2.    Updates all the not-yet-quantized weights, to compensate for the
+             error incurred by quantizing a single weight
+GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers. Frantar et al. ICLR 2023.
+       Optimal Brain Surgeon and General Network Pruning (1993)
+       Optimal Brain Compression: A framework for accurate post-training quantization and pruning (2022)                6
+          GPTQ algorithm: Overview
+1. Pre-compute Cholesky decomposition of the Hessian
+   inverse for input data X of current (Linear) layer
+
+2. Iteratively handle one batch of columns of weight matrix W
+  1. quantize the weights using a rounding method
+  2. calculates the rounding error
+  3. updates the weights in the column block accordingly.
+  4. After processing the batch, it updates all remaining weights
+     based on the block’s errors.
+
+                                                                    7
+Pre-compute Hessian Inverse and Decompose
+  𝐺 = Cholesky (2𝑋 ∙ 𝑋 𝑇 + 𝜆𝐼 −1 ))𝑇   X is batch_size×128k(len)
+                                       ×7168(dim) in Deepseek-
+                                       V3
+                                          ➔ 7168×(bs×128k)
+
+                                        Cholesky
+                                        decomposition, given
+                                        a symmetric positive-
+                                        definite matrix A
+                                               𝐴 = 𝐿 ∙ 𝐿𝑇
+                                                                8
+   GPTQ: Block-wise Quantize and Update
+                                current column
+weight matrix W, block size B=4
+              i      j                 1. quantize the column’s weights
+                                          (e.g. using int8 or int4)
+                                           q:,j = quant(W:,j )
+
+
+
+
+  quantized   current block remaining
+  block                     block (float)
+
+
+
+
+                                                                      9
+   GPTQ: Block-wise Quantize and Update
+                                current column
+weight matrix W, block size B=4
+              i      j                 1. quantize the column’s weights
+                                          (e.g. using int8 or int4)
+                                           q:,j = quant(W:,j )
+                                       2. calculates the rounding error
+                                          E:,j−i = (W:,j − Q:,j )/Gj,j
+
+  quantized   current block remaining       𝐺 = Cholesky (2𝑋 ∙ 𝑋 𝑇 + 𝜆𝐼 −1 ))𝑇
+  block                     block (float)
+
+
+
+
+                                                                           10
+    GPTQ: Block-wise Quantize and Update
+                                   current column
+weight matrix W, block size B=4
+              i      j                    1. quantize the column’s weights
+                                             (e.g. using int8 or int4)
+                                              q:,j = quant(W:,j )
+                                          2. calculates the rounding error
+                                             E:,j−i = (W:,j − Q:,j )/Gj,j
+                                          3. updates the rmaining weights
+  quantized current block remaining          in the column block
+  block                     block (float)   W:,j:(i+B) = W:,j:(i+B) − E:,j−i ∙ Gj,j:(i+B)
+
+
+
+
+                                                                                        11
+        GPTQ: Lazy-update for rest weights
+                                   current column
+weight matrix W, block size B=4
+              i      j                    1. quantize the column’s weights
+                                             (e.g. using int8 or int4)
+                                              q:,j = quant(W:,j )
+                                          2. calculates the rounding error
+                                             E:,j−i = (W:,j − Q:,j )/Gj,j
+                                          3. updates the rmaining weights
+  quantized current block remaining          in the column block
+  block                     block (float)   W:,j:(i+B) = W:,j:(i+B) − E:,j−i ∙ Gj,j:(i+B)
+
+                                                   After compute the current block
+                                                   4. update all remaining weights
+                                                     W:, i+B : = W:, i+B : − E ∙ Gi: i+B , i+B :
+                                                                                              12
+GPTQ Algorithm
+
+
+                 =G in previous
+                 slides
+
+
+
+
+                                  13
+                Why GPTQ works?
+• Quantize one weight in W can be solved using the Optimal
+  Brain Surgeon method (OBS)
+  o ➔ We can update one column of weights
+
+• Iteratively updating the inverse Hessian can be updated
+  efficiently (rank-1 update using Optimal Brain Quantization,
+  OBQ method)
+  o ➔ Using Cholesky to pre-compute
+
+• Updating weights after calculating rounding errors can be
+  done in batch and lazy-fashion                                 14
+                   Optimal Brain Surgeon
+•    Taylor approximation to find optimal single weight in W to remove, and optimal
+    update of remaining weights to compensate.
+
+•    Weight to prune 𝜔𝑝 which incurs the minimal increase in loss and the
+    corresponding update of the remaining weights 𝛿𝑝 is,
+                                   𝜔𝑝2                 𝜔𝑝         −1
+                 𝜔𝑝 = 𝑎𝑟𝑔min 𝜔𝑝            , 𝛿𝑝 = −            ∙ 𝐻:,𝑝 ,
+                         𝜔𝑝       𝐻−1 𝑝𝑝              𝐻−1 𝑝𝑝
+    In transformers, 𝜔𝑝 could potentially be LayerNorm/FFN/MHA weights
+
+•    H is a d×d Hessian matrix where 𝑑 = 𝑑𝑟𝑜𝑤 ∙ 𝑑𝑐𝑜𝑙 , which is expensive to store
+    and compute with.
+
+•    H needs to be updated and inverted at O(d) pruning steps with a Θ(d3 )
+    complexity. Total runtime O(d4 ) is too inefficient.
+                                                                                      15
+                  Optimal Brain Quantization
+    •    OBQ picks the greedy optimal weight 𝑊𝑞 to quantize next, along with
+        the update 𝛿𝐹 to all remaining unquantized weights F.
+                                      2
+                      𝑞𝑢𝑎𝑛𝑡 𝑤𝑞 − 𝑤𝑞                𝑤𝑞 − 𝑞𝑢𝑎𝑛𝑡(𝑤𝑞 )      −1
+          𝑤𝑞 = 𝑎𝑟𝑔min                     , 𝛿𝐹 = −                 ∙ (𝐻𝐹   ):,𝑞∙
+                 𝑤𝑞       𝐻𝐹−1 𝑝𝑝                        −1
+                                                       𝐻𝐹 𝑝𝑝
+full-precision                             update
+    •    quantizes weights iteratively
+        until all weights are quantized.
+
+    •   Hessian 𝐻 = 2𝑋𝑋 𝑇
+
+                                                                                   16
+                Optimal Brain Quantization
+
+1.   Row wise decomposition: OBQ applies OBS per row of the weight
+     matrix         𝑑𝑟𝑜𝑤
+                                         2
+                                       ෢𝑖,: 𝑋
+                            ෍ 𝑊𝑖,: 𝑋 − 𝑊      2
+                            𝑖=1
+     No Hessian interaction between different rows and so we can work with
+     the individual 𝑑𝑐𝑜𝑙 × 𝑑𝑐𝑜𝑙 H corresponding to each of the 𝑑𝑟𝑜𝑤 rows.
+
+2.    Efficient inverse
+     Reduces overall costs of this process to 𝑂(𝑑𝑟𝑜𝑤 ∙ 𝑑𝑐𝑜𝑙
+                                                        3
+                                                            ) time and 𝑂(𝑑𝑐𝑜𝑙
+                                                                          2
+                                                                              )
+     memory.
+
+
+                                                                                  17
+        Column Update using OBQ is efficient
+•       Quantize all rows of weights in same order.
+    o    ➔ column-wise update
+
+•    𝐹 and 𝐻𝐹−1 are always the same for all rows
+    as 𝐻𝐹 depends only on the layer inputs 𝑋𝐹 ,
+    which are the same for all rows.
+
+•    Perform update on 𝐻𝐹−1 only 𝑑𝑐𝑜𝑙 times, once
+    per column, rather than 𝑑𝑟𝑜𝑤 ∙ 𝑑𝑐𝑜𝑙 times, once
+    per weight.
+
+•    This reduces the overall runtime
+    from 𝑂(𝑑𝑟𝑜𝑤 ∙ 𝑑𝑐𝑜𝑙
+                   3
+                       ) to
+                    2
+    𝑂(𝑚𝑎𝑥(𝑑𝑟𝑜𝑤 ∙ 𝑑𝑐𝑜𝑙      3
+                        , 𝑑𝑐𝑜𝑙 )).
+                                                      18
+   Insight of Arbitrary Update Order for OBQ
+
+     •    OBQ quantizes weights in a specific order defined by the
+         corresponding errors.
+
+     •    Improvement over quantizing the weights in arbitrary order is
+         generally small
+         o   quantized weights with large individual error is balanced out by those weights
+             towards the end of the process
+         o   few other unquantized weights can be adjusted for compensation
+
+
+
+
+                                                                                                               19
+GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers. Frantar et al. ICLR 2023.
+                        Lazy Batch Updates
+•    Naïve column update is not fast in practice
+    o low compute-to-memory-access ratio
+    o cannot highly utilize GPUs compute.
+
+•    Observation:
+    o Rounding decisions for col i only affected
+      by updates on this col
+    o Updates to later columns are irrelevant at
+      this point in the process.
+•    Efficient update
+
+       𝑊:, 𝑖+𝐵 : = 𝑊:, 𝑖+𝐵 : − 𝐸 ∙ 𝐺𝑖: 𝑖+𝐵 , 𝑖+𝐵 :
+                                                     20
+                  Cholesky Pre-computation
+•   Numerical inaccuracies, can become a
+    major problem at the scale of LLMs,
+
+•       𝐻𝐹−1 can become indefinite
+
+•       Observation:
+    o    Only information required from 𝐻𝐹−1
+                                           𝑞
+                                              when quantizing
+         weight q from unquantized 𝐹𝑞 , are the elements in row
+         q starting with the diagonal.
+
+•    GPTQ leverages Cholesky kernels to
+    precompute all information from 𝐻 −1 without any
+    significant increase in memory consumption.
+                                                                  21
+        Examine Effectiveness of GPTQ
+
+•    How is GPT-Q’s perf on small models compared with accurate-but-
+    expensive methods?
+•   How does GPT-Q’s quantization time scale with model size?
+•    How is GPT-Q’s perf on large models compared with Round-to-
+    nearest methods?
+•    How does GPT-Q speed up model inference in practical
+    applications?
+
+•   Does GPT-Q even work for extreme 2-bit quantization?
+                                                                       22
+        Quantization Experiment Setup
+
+•    Calibration data randomly sampled from C-4 dataset to
+    ensure GPTQ is not task-aware.
+•    Standard uniform per-row asymmetric quantization on the
+    min-max grid
+
+•    Quantize on each transformer block (6 layers), with input X
+    from last quantized block output.
+
+
+                                                                   23
+How does GPT-Q speed up model inference in practical
+                 applications?
+
+      OPT-175B mode (Measured with pipeline parallelism)
+
+
+
+
+  •    Single-batch inference is memory-bound because of GEMVs. Although
+      dequantization consumes extra compute, the custom kernel reduces
+      memory access and thus reduces e2e time.
+
+
+
+                                                                           24
+How is GPT-Q’s perf on large models compared with
+          Round-to-nearest methods?
+
+
+
+
+                                                    25
+How is GPT-Q’s perf on large models compared with
+          Round-to-nearest methods?
+
+
+
+
+                                                    26
+How does GPT-Q’s quantization time scale with model
+                     size?
+                             GPT-Q   ZeroQuant-LKD
+
+
+                                     1.3B model - 3h
+
+
+
+
+ * Measured on single A100
+                                                       27
+Does GPT-Q even work for extreme 2-bit quantization?
+
+
+
+
+                                                   28
+How is GPT-Q’s perf on small models compared with
+        accurate-but-expensive methods?
+
+
+
+
+                Fastest prior method                29
+                 GPTQ for LLaMA
+• https://github.com/qwopqwop200/GPTQ-for-LLaMa/
+
+• GPTQ in
+  o https://github.com/qwopqwop200/GPTQ-for-
+    LLaMa/blob/triton/gptq.py
+
+
+
+
+                                                   30
+GPTQ: Initialization
+
+
+                ●   Reshape weights from the
+                    input layer
+
+
+
+                ●   Initialize Hessian matrix
+
+
+
+
+                                                31
+GPTQ: Hessian Matrix Update
+
+
+                ●   Update Hessian matrix with
+                    information from a new
+                    batch of the input and
+                    output pairs
+
+
+
+
+                                                 32
+GPTQ: Lazy Batch-Update
+
+            ●   Processes weight matrix W in blocks.
+
+            ●   Updates quantization parameters conditionally
+                based on group size and static grouping
+                settings.
+
+
+
+
+                                                                33
+GPTQ: Lazy Batch-Update
+
+             ●   Applies quantization function quantize to
+                 weights and computes the loss due to
+                 quantization.
+
+
+             ●   Adjusts remaining block weights based on
+                 quantization error to minimize the overall error.
+
+
+
+
+                                                                34
+GPTQ: Cholesky Reformulation
+
+                  ●   Applies damping to the Hessian
+                      matrix diagonals
+
+
+                  ●   Performs Cholesky decomposition
+                      and inversion
+
+                  ●   Transforms the Hessian into its
+                      inverse.
+
+
+
+
+                                                        35
+import random
+
+
+                                                                                                               AutoGPTQ Tool
+from auto_gptq import AutoGPTQForCausalLM, BaseQuantizeConfig
+from datasets import load_dataset
+import torch
+from transformers import AutoTokenizer
+
+# Define base model and output directory
+model_id = "gpt2” #modify to your model
+out_dir = model_id + "-GPTQ”
+
+# Load quantize config, model and tokenizer
+quantize_config = BaseQuantizeConfig(bits=4, group_size=128, damp_percent=0.01, desc_act=False)
+model = AutoGPTQForCausalLM.from_pretrained(model_id, quantize_config)
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+# Load data and tokenize examples
+n_samples = 1024
+data = load_dataset("allenai/c4", data_files="en/c4-train.00001-of-01024.json.gz", split=f"train[:{n_samples*5}]")
+tokenized_data = tokenizer("\n\n".join(data['text']), return_tensors='pt')
+
+# Format tokenized examples
+examples_ids = []
+for _ in range(n_samples):
+i = random.randint(0, tokenized_data.input_ids.shape[1] - tokenizer.model_max_length - 1)
+j = i + tokenizer.model_max_length
+input_ids = tokenized_data.input_ids[:, i:j]
+attention_mask = torch.ones_like(input_ids)
+examples_ids.append({'input_ids': input_ids, 'attention_mask': attention_mask})
+
+# Quantize with GPTQ
+model.quantize(examples_ids, batch_size=1, use_triton=True)
+
+# Save model and tokenizer
+model.save_quantized(out_dir, use_safetensors=True)
+tokenizer.save_pretrained(out_dir)
+                                                                                                                               36
+           Summary and Limitations
+• GPTQ
+  o approximate second-order of weights
+  o layer-wise quantization + compensation for errors + precompute
+  o accurately compress some of the largest publicly-available
+    models down to 3 and 4 bits, and bring end-to-end speedups
+
+• Limitations
+  o Theoretical computation is the same
+  o Focus on weight quantization, and does not consider activation
+    quantization
+                                                                     37
+              Quiz
+• on canvas
+
+
+
+
+                     38
+

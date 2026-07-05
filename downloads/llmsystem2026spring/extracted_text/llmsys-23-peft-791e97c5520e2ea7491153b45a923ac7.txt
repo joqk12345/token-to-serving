@@ -1,0 +1,611 @@
+Parameter Efficient Fine-Tuning
+           for LLM
+                             Lei Li
+
+
+
+Ack: Kath Choi, Jiaqi Song, Xianwei Zou, Hanshi Sun, Steven Kolawole
+                                 Recap
+• Direct quantization for low-bit numbers
+   o absmax: linearly scale according to max abs value
+   o zero-point: finding zero-point and scale
+
+• Layer-wise quantization approaches
+   o AdaQuant / KD: ZeroQuant / LLM.int8()
+
+• GPTQ
+   o layer-wise quantization + compensation for errors + precompute
+   o accurately compress some of the largest publicly-available models down to 3
+     and 4 bits, and bring end-to-end speedups
+
+                                                                                   2
+                         Outline
+
+• Overview of Parameter Efficient Fine-Tuning
+
+• LoRA: Low-rank Adaptation (or Counter-interference
+  adapter, CIAT)
+
+• QLoRA: Quantization + Low-rank training
+
+• Code Walkthrough
+
+
+                                                       3
+        LLM Fine-tuning is Expensive
+• Full-parameter Fine-Tuning
+  o Update all model parameters → Require large GPU memory
+
+• e.g. Harf-precision Fine-tuning cost per parameter (Adam)
+  o Weight: 16 bits (2 bytes) * N
+  o Weight Gradient: 16 bits (2 bytes) * N
+  o Optimizer States: 2 * 16 bits (4 bytes) * N
+  o Activations: ~ 1-2x of parameters
+  o LLaMA-8B ➔ ~ 80GB working memory
+
+                                                              4
+Parameter Efficient Fine-tuning (PEFT)
+• Only update a small subset (or low-rank) of parameters
+
+• e.g. Fine-tuning cost per parameter with LoRA
+  o Weight: 16 bits
+  o Weight Gradient: ~0.4 bits
+  o Optimizer State: ~0.8 bits
+  o Adapter Weights: ~0.4 bits
+  o Activations: ~ 1-2x of parameters
+  o LLaMA-8B ➔ ~ 33GB working memory, fits a single A100.
+
+                                                            5
+             PEFT with Quantization
+• Parameter efficient fine-tuning together with quantization
+
+• e.g. Fine-tuning cost per parameter with QLoRA
+  o Weight: 4 bits
+  o Weight Gradient: ~0.4 bit
+  o Optimizer State: ~0.8 bit
+  o Adapter Weights: ~0.4 bit
+  o Activations: ~ 1-2x of parameters
+  o LLaMA-8B ➔ ~ 33GB 9.2GB working memory
+
+            Dettmers et al. QLoRA: Efficient Finetuning of Quantized Large Language Models. 2022.   6
+                          PEFT Approaches
+• Selective Methods:
+  o fune-tune selected subsets
+
+• Reparameterization Method:
+  o low-rank representation weights
+
+• Additive Methods:
+  o add trainable layers or parameters
+  o e.g. Adapters, Soft prompts
+    (Prompt Tuning)
+                                                                                                   7
+       Scaling Down to Scale Up: A Guide to Parameter-Efficient Fine-Tuning. Lialin et al. 2024.
+                         Outline
+
+• Overview of Parameter Efficient Fine-Tuning
+
+• LoRA: Low-rank Adaptation (Counter-interference adapter,
+  CIAT)
+
+• QLoRA: Quantization + Low-rank training
+
+• Code Walkthrough
+
+
+                                                             11
+               Additive Fine-tuning
+• Freeze the pre-trained parameters 𝑊0
+
+• Train a low-rank update to the parameters 𝛿𝑊
+  o 𝑊 ′ = 𝑊0 + 𝛿𝑤
+
+
+
+                                         fine-tune
+                                         low-rank
+
+
+                                                     12
+Low-rank Adapation (LoRA) for Fine-tuning
+first invented in Counter-Interference Adapter (CIAT) for Multilingual Machine Translation
+[Zhu et al, EMNLP 2021], later re-invented by Low-Rank Adaptation of Large Language
+Models [Hu et al, ICLR 2022]
+
+
+
+
+                                                 𝑊 ′ = 𝑊 + 𝐴𝑑×𝑟 ∙ 𝐵𝑟×𝑑
+                                                 low rank 𝑟 ≪ 𝑑
+
+
+
+
+                                                                                             13
+                    Applying LoRA/CIAT to LLM
+                 Output
+                 Probabilities                                               Apply LoRA to weights
+                                                                             in attention layer
+               Softmax
+                                                 Multi-Head Attention
+               Linear
+
+
+
+               Add & Norm
+                                                     Linear
+                                                                                  𝑊𝑄 , 𝑊𝐾 , 𝑊𝑉 , 𝑊
+                                                     Concat
+
+                                                                             but not to FFN’s linear
+               Feed Forward
+
+
+               Add & Norm
+
+
+                                                                             weights (storing
+                                       Scaled Dot-Product                h
+Add & Norm     Multi-Head              Attention
+               Attention
+Feed Forward
+
+
+
+Add & Norm
+               Add & Norm              Linear       Linear      Linear       knowledge)
+               Masked
+Multi-Head     Multi-Head                              K            V
+Attention      Attention
+                                          Q
+
+
+                                                                             In CIAT method, it is
+Input
+Embedding
+               Output
+               Embedding
+                                   rank r=8 or 16                            also applied to
+   Inputs
+                 Outputs                                                     embeddings and FFN
+                                                                             layers, and improves.
+                 (shifted right)
+
+
+                                                                                                       14
+                Inference for LoRA-trained models
+                    Output
+
+                                                   • Inference: use 𝑊 ′ = 𝑊 + 𝐴 ∙ 𝐵 for
+                    Probabilities
+
+                  Softmax
+
+
+                  Linear
+                                                     each weight matrix and store A,B as
+                  Add & Norm
+
+                  Feed Forward
+                                                     well (small additional cost, r=8 or
+ Add & Norm
+                  Add & Norm                         16)
+                  Multi-Head
+                  Attention
+ Feed Forward
+
+
+
+ Add & Norm
+                  Add & Norm
+
+                  Masked
+                                                   • We can switch between LoRA
+                                                     weight for each task/domain
+ Multi-Head       Multi-Head
+ Attention        Attention
+
+
+
+
+                                                        o 𝑊 ′′ = 𝑊 ′ − 𝐴 ∙ 𝐵 + 𝐴′′ ∙ 𝐵′′
+ Input            Output
+ Embedding        Embedding
+
+                                                               LoRA weights for                    LoRA weights for
+                                                               current domain                      new domain
+                    Outputs
+    Inputs
+                    (shifted right)
+
+Counter-Interference Adapter (CIAT) for Multilingual Machine Translation [Zhu et al, EMNLP 2021]
+                                                                                                                      15
+Low-Rank Adaptation of Large Language Models [Hu et al, ICLR 2022]
+ Backward Computation of LoRA/CIAT
+                       𝑊 ′ = 𝑊0 + 𝐴 ∙ 𝐵
+
+• The original pre-trained weight matrix is fixed. We only need
+  to compute the gradients with respect to A and B.
+         𝜕𝐿            𝜕 𝑊0 𝑥 + 𝐴 ∙ 𝐵𝑥
+             = 𝑔𝑜𝑢𝑡 ∙                  = 𝑔𝑜𝑢𝑡 ∙ 𝐵𝑥 𝑇
+         𝜕𝐴                  𝜕𝐴
+          𝜕𝐿           𝜕 𝑊0 𝑥 + 𝐴 ∙ 𝐵𝑥        𝑇
+             = 𝑔𝑜𝑢𝑡 ∙                   = (𝑔𝑜𝑢𝑡  ∙ 𝐴)𝑥 𝑇
+          𝜕𝐵                  𝜕𝐵
+
+
+                                                                  16
+                                  Training LoRA/CIAT
+   • No need to store original
+     parameter states
+
+   • Only need to store:
+        o original parameters
+        o adapter weights: 2 x d x r
+        o adapter gradients: 2 x d x r
+        o adapter states: first and
+          second moments, 2 x d x r
+        o activations
+Counter-Interference Adapter (CIAT) for Multilingual Machine Translation [Zhu et al, EMNLP 2021]
+                                                                                                   17
+Low-Rank Adaptation of Large Language Models [Hu et al, ICLR 2022]
+Memory Consumption of LoRA Training
+• LoRA reduce the number of trainable parameters thus
+  reducing the GPU memory requirement
+
+• LLaMA 8B:
+  8B parameters -> 16GB (BF16)
+  optimizer states -> 48GB (Adam)
+
+• With LoRA/CIAT:
+  4M parameters -> 8MB
+  optimizer states -> 24MB (Adam)
+                                                        18
+    Benefits of LoRA for Large Models
+• Reduced Memory Footprint
+  o no need to store state for frozen params
+  o LLaMA 8B: 8B → 4M
+
+• Faster Training (fine-tuning)
+  o training time
+
+• ➔ Enable fine-tuning of large models, and on smaller
+  devices.
+
+• Inference is as normal LLM.                            19
+                Experiments of LoRA
+
+• Tasks
+  o Natural Language Understanding (NLU): RoBERTa, DeBERTa
+     ▪ Subtasks: MNLI, SST-2, MRPC, CoLA, QNLI, QQP, RTE, STS-B
+  o Natural Language Generation (NLG): GPT-2, GPT-3
+     ▪ Metrics: BLEU, NIST, MET, ROUGE-L, CIDEr
+
+• Six Baselines
+  o Fine-Tuning, Bias-only or BitFit, Prefix-embedding tuning
+    (PreEmbed), Prefix-layer tuning (PreLayer), Adapter tuning, LoRA
+   LoRA is more effective than other fine-
+             tuning methods
+LoRA enhances model adaptation with fewer parameters, ensuring both
+efficiency and improved performance
+NLU Tasks                             NLG Tasks
+How to choose a proper rank in LoRA?
+
+• Increasing rank does not cover more meaningful subspaces
+  ➔ a low-rank adaptation matrix (r=8)
+
+
+
+
+                                                             23
+                    Experiments of LoRA
+NLG Stress Test: Scale up to GPT-3 with 175B parameter
+   Not all methods benefit monotonically from an
+   increase in trainable parameters.
+LoRA Performance on Math (GSM8K)
+
+
+
+
+                                   28
+                         Outline
+
+• Overview of Parameter Efficient Fine-Tuning
+
+• LoRA: Low-rank Adaptation (Counter-interference adapter,
+  CIAT)
+
+• QLoRA: Quantization + Low-rank training
+
+• Code Walkthrough
+
+
+                                                             30
+        Quantization-Aware Training
+
+• GPTQ is Post-Training Quantization (PTQ): converting the
+  weights of an already trained model to a lower precision
+  without any retraining.
+
+• Quantization-Aware Training (QAT): integrates the weight
+  conversion process during the training stage. often superior
+  model performance. (QLoRA)
+
+
+                                                                 31
+                        Overview of QLoRA
+QLoRA = Low-rank + Quantized training
+● Major innovations:
+ ○ 4-bit Normal Float for storage
+ ○ Double Quantization
+ ○ Page Optimizer
+● BF16 for computation
+
+
+➔  Reduces the average memory requirements of fine-tuning a 65B
+  parameter model from 780GB of GPU memory to 48GB on a single
+  GPU.
+➔ Preserving performance compared to a 16- bit finetuning
+                                                                                   32
+    Dettmers et al. QLORA: Efficient Finetuning of Quantized LLMs. NeurIPS 2023.
+                          QLoRA algorithm
+QLORA has one storage data type (usually 4-bit NormalFloat)
+and a computation data type (BF16)
+
+1. Double Quantize the model weights to NF4 format
+
+2. Double De-quantize the weights to BF16
+
+3. Perform forward and backward pass in BF16
+
+4. Compute weight gradients (BF 16) only for the LoRA
+   parameters
+                                                                                  33
+   Dettmers et al. QLORA: Efficient Finetuning of Quantized LLMs. NeurIPS 2023.
+                       4-bit Number
+• A 4-bit number can represent 16 values
+
+• Standard quantization (absmax) divides data into equal-
+  sized bins
+  o high quantization error for non-uniform distributed data
+  o lots of data with small difference, all get quantized to the same
+    value
+
+
+
+
+                                                                        34
+ Normal Float 4 bit quantization (NF-4)
+• split weights into blocks of 64 numbers
+
+• Find max abs value ➔ scale
+                                                        𝑥
+• Normalize the 64 numbers w/ scale ( 𝑥ො =                    )
+                                                      𝑠𝑐𝑎𝑙𝑒
+
+• Find the nearest value from a lookup table
+  [-1. -0.6962 -0.5251 -0.3949 -0.2844 -0.1848 -0.0911 0. 0.0796 0.1609 0.2461
+  0.3379 0.4407 0.5626 0.723 1. ]
+
+• Output the quantized values (index from lookup table) [-7, 8]
+                                                                                 35
+                               Illustration: NF-4
+      value = 0.0045
+      scale = max(abs(x)) = 0.0071
+      normalized value = 0.0045 / 0.0071 = 0.63
+
+
+
+
+-1.        -0.696   -0.525 -0.395 -0.28 -0.18 -0.09 0. 0.08 0.16 0.25 0.34 0.44 0.56   0.72   1.
+
+
+  mapped value = 0.56
+  quantized value = 6
+                                                                                               36
+        Constructing NF-4 Lookup Table
+Exact values of the NF4 data type:
+
+
+
+
+                                     probably quantile
+
+
+
+
+                                                         37
+  De-quantization of NF-4
+                         [-1. -0.6962 -0.5251 -0.3949 -0.2844 -0.1848 -0.0911 0.
+-7 -6 -5 -4 -3   6   8   0.0796 0.1609 0.2461 0.3379 0.4407 0.5626 0.723 1. ]
+
+
+                            0.5626
+
+
+                 e.g. 0.0071
+
+
+                           de-quantized value =0.00399
+                           rounding error = 0.0045-0.00399
+                           = 0.0005
+                                                                               38
+    Double Quantization for Scale Factors
+
+ Motivation: While a small blocksize is required for precise 4-
+ bit quantization, it also has a considerable overhead.
+    •    E.g. using 32-bit constants and a blocksize of 64, quantization constants add
+         32/64 = 0.5 bits per parameter on average.
+
+
+
+
+Double Quantization (DQ) quantized the quantization constants
+for additional memory savings.
+                                                                                         39
+    Dettmers et al. QLORA: Efficient Finetuning of Quantized LLMs. NeurIPS 2023.
+            QLoRA Double Quantization
+   • For every block of 64 values, apply NF-4 quantization
+
+   • For every block of 256 scales (from NF-4), apply FP8
+     quantization, store 2 nd scale in FP32
+
+
+
+
+memory needed: 0.5 + 1/64 + 1/(64*256) * 4 = 0.52 bytes per param   40
+                                           QLoRA
+• Store pre-trained weights in NF4 with double quantization
+  o C1 in FP32 (block size 256), C2 in FP8 (block size 64)
+
+• Apply LoRA, store LoRA weights in BF16
+
+• Store input in BF16, computing (forward/backward/opt) in BF16
+
+
+
+
+      Dettmers et al. QLORA: Efficient Finetuning of Quantized LLMs. NeurIPS 2023.   41
+                              Paged Optimizers
+
+ Motivation: When training LLMs, GPU’s OOM error is a common
+ problem.
+
+
+
+
+Paged optimizers are used to manage memory usage during training.
+                                                                                    42
+     Dettmers et al. QLORA: Efficient Finetuning of Quantized LLMs. NeurIPS 2023.
+                 Paged Optimizers
+
+• Using the NVIDIA unified memory which does page-to-page
+  transfers between the CPU and GPU for error-free GPU
+  processing when the GPU occasionally runs out-of-memory.
+  o like regular memory paging between CPU RAM and the disk.
+  o Feature allocates paged memory for the optimizer states which
+    are then automatically evicted to CPU during GPU OOM and
+    back into GPU memory when memory is needed in the optimizer
+    update step
+
+
+                                                                    43
+                         Paged Optimizers
+
+
+
+
+                                                                               44
+Dettmers et al. QLORA: Efficient Finetuning of Quantized LLMs. NeurIPS 2023.
+                     Performance of QLoRA
+•   Default LoRA Hyperparameters do not match 16-bit performance
+•   NF4 yield better performance than 4-bit Float (FP4)
+
+
+
+
+                                                                                     45
+      Dettmers et al. QLORA: Efficient Finetuning of Quantized LLMs. NeurIPS 2023.
+                     Experiments of QLoRA
+•   4-bit QLoRA matches 16-bit full fine-tuning and 16-bit LoRA performance
+
+
+
+
+                                                                                     46
+      Dettmers et al. QLORA: Efficient Finetuning of Quantized LLMs. NeurIPS 2023.
+                         Outline
+
+• Overview of Parameter Efficient Fine-Tuning
+
+• LoRA: Low-rank Adaptation (Counter-interference adapter,
+  CIAT)
+
+• QLoRA: Quantization + Low-rank training
+
+• Code Walkthrough
+
+
+                                                             48
+LoRA Code Walkthrough
+
+                 ●   Define the LoRA Layer
+
+
+
+
+                                             49
+LoRA Code Walkthrough
+
+
+
+                 ●   LoRA implement in the
+                   linear layer
+                 ● Initialize the LoRA A and
+                   B layer
+                 ● Freeze the pre-trained
+                   weight matrix
+                                           50
+LoRA Code Walkthrough
+
+           ●  Train module merge the
+             weights of LoRA layer into the
+             pre-train weights
+           ● Given an input x, the forward
+             process compute the sum of
+             the result from two branches:
+
+
+
+
+                                              51
+                            QLoRA code
+    To train with QLoRA, load the model with the quantization config, then run with
+    LoRA. BitsAndBytes contains custom wrapper for CUDA quantization operations.
+
+    AutoModelForCausalLM.from_pretrained( "meta-llama/Llama-2-70b",
+    quantization_config=BitsAndBytesConfig(
+           load_in_4bit=args.bits == 4,
+           load_in_8bit=args.bits == 8,
+           llm_int8_threshold=6.0,
+           llm_int8_has_fp16_weight=False,
+           bnb_4bit_compute_dtype=compute_dtype,
+           bnb_4bit_use_double_quant=args.double_quant,
+           bnb_4bit_quant_type=args.quant_type,))
+
+                                    Inference Demo:
+https://github.com/artidoro/qlora/blob/main/examples/guanaco_7B_demo_colab.ipynb
+                                                                                      52
+                        Summary
+
+• LoRA/CIAT enables cost-effective adaptation of large
+  models by modifying fewer parameters (low-rank).
+
+• Scalability: Effective for giant models like GPT-3, making
+  adaptation more accessible.
+
+• Low-Data Efficacy: Superior in low-data settings, reducing
+  the need for large datasets.
+
+                                                               53
+                       Summary
+
+• QLoRA: double quantizing weights using NF4, computing in
+  BF16
+
+• QLoRA matches original Low-rank Adapter performance.
+
+• 1st method that enables fine-tuning of 33B LLM on a single
+  consumer GPU
+
+
+
+                                                               54
+              Quiz
+• on canvas
+
+
+
+
+                     55
+

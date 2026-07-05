@@ -1,0 +1,26 @@
+terms:
+  llm_systems:
+    preferred: "LLM systems"
+    definition: "The full stack required to train, adapt, optimize, and serve large language models: model objective, architecture, kernels, frameworks, distributed training, inference runtime, and serving infrastructure."
+    first_defined: "01-why-llm-systems"
+  token:
+    preferred: "token"
+    definition: "A discrete model input/output unit produced by a tokenizer; not necessarily a word."
+    first_defined: "02-tokens-probability-transformers"
+  prefill:
+    preferred: "prefill"
+    definition: "The inference phase that processes the prompt/context and builds the initial KV cache."
+    first_defined: "12-inference-cost-model"
+  decode:
+    preferred: "decode"
+    definition: "The autoregressive inference phase that generates new tokens, typically one step at a time per sequence."
+    first_defined: "12-inference-cost-model"
+  kv_cache:
+    preferred: "KV cache"
+    definition: "Cached key and value tensors from prior attention steps, reused during autoregressive decoding."
+    first_defined: "12-inference-cost-model"
+  model_algorithm_system_codesign:
+    preferred: "model-algorithm-system co-design"
+    definition: "Joint design across model architecture, training/inference algorithms, software runtime, and hardware constraints."
+    first_defined: "01-why-llm-systems"
+

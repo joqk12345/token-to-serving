@@ -1,0 +1,556 @@
+Design of Efficient LLM
+   Inference Server
+          Lei Li
+                        Outline
+• Overview of LLM Inference Server
+
+• LLM Request Scheduler
+
+• Scheduler with Continuous Batching
+
+• KV Cache Management with RadixAttention
+
+• Cache-aware scheduling and load balancing
+
+• Zero-overhead scheduler and worker
+                                              2
+                           LLM Serving
+
+                                          Backend
+     user                                Computing
+                                           Engine
+                              LLM
+                              Server
+
+200 million DAU
+2.5 billion prompt daily                  Memory
+                                          (session
+30k reqs/s                                  data)
+                                                     3
+                 LLM Serving Pattern
+Multi-user Single Round Generation
+
+     User1         Prompt1
+
+
+     LLM                             Answer1
+
+
+     User2         Prompt2
+
+
+     LLM                             Answer2
+
+   Different users may issue same prompts      4
+                LLM Serving Pattern
+Multi-round Chat
+
+ User    Prompt 1              Prompt 2          Prompt 3
+
+
+ LLM                Answer 1              Answer 2          Answer 3
+
+
+
+ Should LLM server keep the user chat history in GPU
+ memory and wait for next turn?
+
+                                                                       5
+              LLM Serving Pattern
+Multi-Generation
+     User          Prompt
+                                 Answer 1
+     LLM
+                                 Answer 2
+                                 Answer 3
+
+     User           Prompt w/ in-context examples
+
+     LLM                                            Answer 1
+                                                    Answer 2
+                                                    Answer 3
+    Execute the LLM generation three times?                    6
+  Design Goals of Efficient LLM Server
+• Maintain multi-user chat sessions
+
+• Handle massive user requests at one time
+  o varying sequence generation lengths
+  o requests with common prompt prefix
+
+• Optimizing for Throughput and Latency
+
+• Utilize heterogeneous devices (CPU/GPU)
+
+• Examples: ORCA, SGLang, vLLM
+                                             7
+                        Outline
+• Overview of LLM Inference Server
+
+• LLM Request Scheduler
+
+• Scheduler with Continuous Batching
+
+• KV Cache Management with RadixAttention
+
+• Cache-aware scheduling and load balancing
+
+• Zero-overhead scheduler and worker
+                                              8
+                  LLM Server Architecture
+           SGLang / vLLM share similar arch
+                                   Request       LLM Server
+                                    Queue
+     Client API
+Native generation API           FastAPI Server
+OpenAI-compatible API             Tokenizer
+                                  Scheduler                   Model Worker
+ Structured language                                           Memory pool
+       frontend                                             Radix tree cache
+                                  Detokenizer               Attention backend
+
+                        Lightweight and customizable codebase in Python/PyTorch
+                                                                                  9
+           LLM Request Scheduler
+1. Receive input messages      while True:
+                                   recv_reqs = recv_requests()
+                                   process_input_requests(recv_reqs)
+2. Stream model outputs            batch = get_next_batch_to_run()
+                                   result = run_batch(batch)
+                                   process_batch_result(batch, result)
+3. Check the stop conditions
+
+4. Reorder requests and prepare a batch
+
+5. Allocate memory for the next batch and running batch
+
+
+                                                                     10
+Server
+scheduler
+example
+
+
+
+
+            11
+                        Outline
+• Overview of LLM Inference Server
+
+• LLM Request Scheduler
+
+• Scheduler with Continuous Batching
+
+• KV Cache Management with RadixAttention
+
+• Cache-aware scheduling and load balancing
+
+• Zero-overhead scheduler and worker
+                                              12
+Serving Challenge: Waiting for Longest Gen
+   • A Request Batch may lead to different lengths.
+
+   • Naïve implementation needs to wait for the longest seq
+
+
+
+
+ prefill       decode                prefill          decode   13
+          Serving with Continuous Batching
+  • Iteration-level: at each iteration (i.e. each token generation
+    step) schedule new request whenever one request finishes
+    in a batch
+
+
+
+
+prefill              decode                            prefill                 decode            prefill
+                                                                                                       14
+    ORCA: A Distributed Serving System for Transformer-Based Generative Models. Yu et al. OSDI 2022
+           Serving with Selective Batching
+  • Selectively batch all non-attention operations (linear, layer
+    norm, GeLU, etc)
+        Batched                                             Batched
+
+
+
+
+prefill is grouped
+into one step                                        Executed by Attention Engine
+                                                     (e.g. PagedAttention)
+                                                                                                     15
+   ORCA: A Distributed Serving System for Transformer-Based Generative Models. Yu et al. OSDI 2022
+          Inside Scheduler of SGLang
+• get_next_batch_to_run()
+  o if finishing prefill: moving the completed prefill to decode batch
+  o if new prefill request: get_new_batch_prefill
+     ▪ takes a new request, depending on the available spot in batch, and
+       waiting queue of requests (calculating the priority of requests), then
+       addPrefill
+  o if no new prefill: continue the decode update_running_batch()
+     ▪ check_decode_mem: is there enough GPU memory for running
+        – yes ➔ prepare_for_decode, reduce new_token_ratio
+        – no => batch.retract_decode, increase new_token_ratio, put the req back to
+          prefill_waiting_list
+  o process_batch_result: check if any req is complete. free the kv
+    cache (only reference, not actually free mem)                                     16
+                        Outline
+• Overview of LLM Inference Server
+
+• LLM Request Scheduler
+
+• Scheduler with Continuous Batching
+
+• KV Cache Management with RadixAttention
+
+• Cache-aware scheduling and load balancing
+
+• Zero-overhead scheduler and worker
+                                              17
+            KV Cache Management
+• Standard NN inference only stores the current layer’s
+  output, but do not store all intermediate results for each
+  layer
+
+• This is ok for LSTM/RNN, but it is increasingly slower for
+  Transformer inference – generating each next token would
+  require all previous keys and values for each Transformer
+  layer.
+
+• Store all keys, values for each layer in GPU memory ➔ KV
+  Cache                                                        18
+               KV Cache Management
+Layer2
+
+                                                 KV Cache
+     Q K V     Q K V   Q K V   Q K V
+                                          The red fox
+
+
+
+
+Layer1
+
+
+     Q K V     Q K V   Q K V   Q K V   Att
+                                       = Softmax(𝑞 ∙ 𝐾 𝑇 ) ∙ 𝑉
+
+         The    red     fox     sits                         19
+       KV Cache take large memory!
+• LLaMA3 70B
+  o 80 Transformer layers
+  o dimension: 8192
+  o per token KV uses 2.5MB (stored in FP32)
+  o context length 8k => 20GB per user request
+
+
+
+
+                                                 20
+Managing KV Cache with RadixAttention
+• KV mem pointers are stored in a radix tree (i.e. prefix tree)
+  o each edge is a string
+  o each node contains memory pointers of KVs
+  o the whole path’s string represent the prefix
+
+• Retrieve KV cache for a prompt string
+  o lookup a prompt string’s longest prefix from the radix tree: very
+    fast by matching the edge
+  o returns: number of tokens in prefix matched, the matched node
+
+                                                                        21
+                               Radix Tree
+                                                each edge is a string
+                            “you are an
+“the red fox”               assistant.”         the whole path’s string represent
+                                                the prefix
+
+
+                “what is”              “translate”
+                            “please”
+
+     “the
+     weather”         “jellyfish”
+
+
+
+                                                                                    22
+Radix Tree for KV Cache Management
+                                                     RadixTree is maintained in CPU
+                            “you are an              each edge is a string
+“the red fox”               assistant.”              the whole path’s string
+                                                     represent the prefix
+                                                     node points to the GPU memory
+                “what is”              “translate”   storing the KVs on the edge
+                            “please”
+                                                            KV in GPU mem
+     “the
+                      “jellyfish”                     “you are an
+     weather”
+                                                      assistant.”
+
+                                                       “translate”
+                                                                                 23
+Radix Tree for KV Cache Management
+                                                     each edge is a string
+                            “you are an              the whole path’s string
+“the red fox”               assistant.”              represent the prefix
+                                                     node points to the GPU
+                                                     memory storing the KVs on
+                “what is”              “translate”   the edge
+                            “please”
+                                                           KV in GPU mem
+     “the
+                      “jellyfish”                    “you are an
+     weather”
+                                                     assistant.”
+
+                                                      “translate”
+                                                                                 24
+Add KV for New Request Radix Tree
+
+
+
+
+                                    25
+Add KVs for Next Round User Input in Chat
+
+
+
+
+                                        26
+Node Split and Add for a new user’s request
+
+
+
+node split
+
+
+
+
+                                          27
+ Node Eviction after next round of input
+
+
+
+
+least used KV nodes are evicted from GPU Cache if over flow
+
+                                                              28
+Add KV for User Request with In-context
+              Examples
+
+
+
+
+                                          29
+Add KV for User Request with In-context
+              Examples
+
+
+
+
+                                          30
+KV Eviction after next round of prior user
+                 session
+
+
+
+
+least used KV nodes are evicted from GPU Cache if over flow
+                                                              31
+Next round of In-context Prompt – Evicting
+                   KVs
+
+
+
+
+least used KV nodes are evicted from GPU Cache if over flow
+                                                              32
+                        Outline
+• Overview of LLM Inference Server
+
+• LLM Request Scheduler
+
+• Scheduler with Continuous Batching
+
+• KV Cache Management with RadixAttention
+
+• Cache-aware scheduling and load balancing
+
+• Zero-overhead scheduler and worker
+                                              33
+       Scheduler with RadixAttention
+1. Receive input messages       while True:
+                                    recv_reqs = recv_requests()
+                                    process_input_requests(recv_reqs)
+2. Stream model outputs             batch = get_next_batch_to_run()
+                                    result = run_batch(batch)
+                                    process_batch_result(batch, result)
+3. Check the stop conditions
+
+4. Maintaining radix tree and request reorder
+
+5. Allocate memory for the next batch
+
+
+                                                                      34
+KV Cache-aware Scheduler with RadixAttention
+ • For requests in the queue, sort the requests according to
+   matched prefix length (to maximize the KV cache hit)
+                 #𝑐𝑎𝑐ℎ𝑒𝑑 𝑡𝑜𝑘𝑒𝑛𝑠
+ • Hit rate:
+               #𝑡𝑜𝑡𝑎𝑙 𝑝𝑟𝑜𝑚𝑝𝑡 𝑡𝑜𝑘𝑒𝑛𝑠
+
+
+
+
+                                                               35
+        Cache-aware Load Balancer
+• Maintain KV-Caches on multiple worker nodes
+
+
+
+
+                                                36
+        Cache-aware Load Balancer
+• Predict prefix KV cache hit rates on workers
+
+• Select those with the highest match rates.
+
+
+
+
+                                                 37
+          Cache-aware Load Balancer
+                                    Replica 1,
+                 Prefix 1
+                                    replica 2
+
+
+                 Prefix 2
+                                    Replica 3,
+                                    replica 4
+                            Round robin          Cache aware
+                                                 load balancer
+Throughput (token/s)        82665                158596
+Cache hit rate              20%                  75%
+
+
+                                                                 38
+                        Outline
+• Overview of LLM Inference Server
+
+• LLM Request Scheduler
+
+• Scheduler with Continuous Batching
+
+• KV Cache Management with RadixAttention
+
+• Cache-aware scheduling and load balancing
+
+• Zero-overhead scheduler and worker
+                                              39
+ CPU Overhead with Scheduler
+
+
+
+Ideal case: full GPU usage, eliminate CPU overhead
+
+
+
+
+                                                     40
+Overlap CPU scheduler and GPU worker
+                             Scheduler                                    Scheduler                           Scheduler
+   Blocking
+   Scheduler                                     Model Worker                                  Model Worker               Model Worker
+
+
+                             Scheduler                  Scheduler                 Scheduler
+   Overlapped
+   Scheduler                                     Model Worker              Model Worker            Model Worker
+
+
+Jobs of the CPU scheduler                                                              Ideas
+• Receive input messages                                                               • Resolve the dependency by delaying the
+• Stream model outputs                                                                   stop condition check
+• Check the stop conditions                                                            • Use CUDA events and streams to do fine-
+• Maintaining radix tree and run prefix matching
+                                                                                         grained scheduling
+• Allocate memory for the next batch
+
+                                                                                                                                         41
+   NanoFlow: Towards Optimal Large Language Model Serving Throughput. Kan Zhu et al.
+Zero-overhead CPU scheduling
+
+
+
+
+                               42
+Increased Performance of Scheduler-worker
+               Overlapping
+
+1.3x faster than
+SOTA OSS
+baseline
+
+
+
+
+                                        43
+  Full Execution Flow on SGLang
+
+    ser lient       pro ess input requests       p odel or er
+
+
+
+
+  astA   Ser er      et ne t    at    to run      odel unner
+
+
+
+
+o eni er ana er           run    at                   odel
+
+
+
+
+eto eni er ana er    pro ess    at    result   Attention a   end
+
+
+
+
+                                                                   44
+    Additional Features of LLM Server
+1. Speculative Decoding (SpecForge)
+
+2. Efficient Constraint Decoding (XGrammar)
+
+3. Expert Parallelism: DeepEP
+
+4. Model-specific Support: MLA
+
+
+
+                                              45
+           Summary of LLM Serving
+1. Basic LLM Request Scheduler
+
+2. Continuous Batching
+  o handling requests with varying lengths
+
+3. KV Cache Management with RadixAttention
+  o using radix tree to maintain KVs based on prompt prefix
+
+4. Cache-aware scheduling and load balancing
+
+5. Reducing overhead by overlap scheduling and worker
+                                                              46
+              Quiz
+• on canvas
+
+
+
+
+                     47
+

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PagedAttention 与 vLLM | LLM 系统新生导学</title>
+  <style>
+  :root { --ink:#172033; --muted:#607089; --line:#d8e0ec; --bg:#f6f8fb; --panel:#fff; --blue:#2563eb; --green:#15803d; --amber:#b45309; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif; background: var(--bg); color: var(--ink); letter-spacing: 0; }
+  main { max-width: 920px; margin: 0 auto; padding: 28px 18px 48px; }
+  header, section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 22px; margin-bottom: 14px; box-shadow: 0 10px 28px rgba(23,32,51,.07); }
+  a { color: var(--blue); text-decoration: none; } a:hover { text-decoration: underline; }
+  .back { display: inline-flex; margin-bottom: 12px; font-weight: 700; }
+  h1 { margin: 0 0 8px; font-size: clamp(28px, 4vw, 42px); line-height: 1.08; }
+  h2 { margin: 0 0 12px; font-size: 21px; }
+  p, li { line-height: 1.8; font-size: 16px; }
+  .meta { color: var(--muted); margin: 0; }
+  .tag { display:inline-flex; border-radius:999px; padding:4px 10px; background:#eaf1ff; color:#1d4ed8; font-weight:700; font-size:13px; margin-right:8px; }
+  .grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:14px; }
+  .callout { border-left: 4px solid var(--green); background:#e9f7ef; padding:12px 14px; border-radius:8px; }
+  .questions li::marker { color: var(--amber); font-weight: 800; }
+  @media (max-width: 760px) { .grid { grid-template-columns:1fr; } header, section { padding:18px; } }
+</style>
+</head>
+<body>
+  <main>
+    <a class="back" href="../index.html">返回互动课堂</a>
+    <header>
+      <span class="tag">推理、微调与在线服务</span>
+      <h1>PagedAttention 与 vLLM</h1>
+      <p class="meta">这是一篇面向大学新生的导学文档，根据课程课件重新组织。原始 PDF 仍保留在文末，供深入阅读。</p>
+    </header>
+    <section>
+      <h2>学习目标</h2>
+      <ul><li>理解 KV cache 管理难点</li><li>认识 PagedAttention 的类比</li><li>知道 vLLM 解决的服务问题</li></ul>
+    </section>
+    <section>
+      <h2>核心解释</h2>
+      <p>推理时每个请求都会产生 KV cache。请求长度不同会导致显存碎片和调度困难。</p><p>PagedAttention 借鉴操作系统分页思想，把 KV cache 分块管理，提高显存利用率。</p><p>vLLM 通过更好的缓存管理和调度提升服务吞吐，尤其适合多请求并发。</p>
+    </section>
+    <section>
+      <h2>课堂例子</h2>
+      <p class="callout">图书馆用固定大小书架格管理书，比给每个人随便占一大片空间更容易避免浪费。PagedAttention 对 KV cache 做类似管理。</p>
+    </section>
+    <section>
+      <h2>检查问题</h2>
+      <ol class="questions"><li>KV cache 为什么会造成显存压力？</li><li>分页思想如何减少碎片？</li></ol>
+    </section>
+    <section>
+      <h2>原始资料</h2>
+      <p><a href="../../source_pdfs/llmsys-24-vLLM_woosuk_kwon-b6a0750bb310949461ba5a635a1126eb.pdf" target="_blank" rel="noopener">打开原始课件 PDF</a></p>
+    </section>
+  </main>
+</body>
+</html>

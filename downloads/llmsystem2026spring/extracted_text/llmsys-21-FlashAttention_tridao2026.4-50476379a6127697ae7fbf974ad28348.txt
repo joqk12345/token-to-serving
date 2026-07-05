@@ -1,0 +1,882 @@
+Optimizing Attention for
+  Modern Hardware
+
+           Tri Dao
+        https://tridao.me
+
+
+
+
+                            1
+Motivation: Modeling Long Sequences
+
+
+
+         Enable                      Close Reality Gap                  Open New Areas
+     New Capabilities
+ NLP: Large context required to      Computer vision: higher         Time series, audio, video,
+   understand books, plays,       resolution can lead to better,   medical imaging data naturally
+          codebases.                  more robust insight.           modeled as sequences of
+                                                                         millions of steps.
+
+
+
+
+                                                                                                    2
+Efficiency is the Bottleneck for Modeling Long Sequences with Attention
+Context length: how many other               Increasing context length slows down (or stops) training
+elements in the sequence does
+the current element interact with.
+
+
+
+
+                                                         2x↓
+
+
+
+
+                                     How to efficiently scale models to longer sequences?               3
+Background: Attention is the Heart of Transformers
+
+
+
+
+                                                     4
+  Background: Attention Mechanism
+            Q             K           S = 𝑄 𝐾𝑇                A = Softmax(𝑆)                  V             O
+          (N x d)       (N x d)         (N x N)                   (N x N)                   (N x d)       (N x d)
+
+
+
+                    x             →                   →                              x                =
+
+
+
+
+          Query          Key          Similarity               Attention prob               Value         Output
+                                        Score              = row-wise normalized
+                                                               similarity score
+Typical sequence length N: 1K – 8K
+Head dimension d: 64 – 128                                          𝑒 𝑠1           𝑒 𝑠𝑁
+                                      Softmax 𝑠1 , ⋯ , 𝑠𝑁     =             ,⋯,
+                                                                  σ𝑖 𝑒 𝑠𝑖         σ𝑖 𝑒 𝑠𝑖
+                                                         T
+                                           O = Softmax(QK )V
+                                       Attention scales quadratically in sequence length N                          5
+Background: Approximate Attention
+
+
+
+
+                                       Approximate attention: tradeoff quality for speed fewer FLOPs
+
+
+
+
+Survey: Tay et al. Long Range Arena : A Benchmark for Efficient Transformers. ICLR .2020
+
+
+
+
+                                               Is there a fast, memory-efficient, and exact attention algorithm?   6
+  Our Observation: Attention is Bottlenecked by Memory Reads/Writes
+            Q             K            S = 𝑄 𝐾𝑇            A = Softmax(𝑆)              V             O
+          (N x d)       (N x d)          (N x N)               (N x N)               (N x d)       (N x d)
+
+
+
+                    x             →                  →                           x             =
+
+
+
+
+          Query          Key           Similarity            Attention prob          Value         Output
+                                         Score           = row-wise normalized
+                                                             similarity score
+Typical sequence length N: 1K – 8K
+Head dimension d: 64-128
+
+                                           The biggest cost is in moving the bits!
+                                      Standard implementation requires repeated R/W
+                                                  from slow GPU memory
+
+                                                                                                             7
+Background: GPU Compute Model & Memory Hierarchy
+
+
+         2. Data moved to
+       compute units & SRAM
+          for computation
+
+
+
+
+        1. Inputs start out in
+        HBM (GPU memory)
+
+
+          3. Output written
+             back to HBM
+
+
+
+
+Blogpost: Horace He, Making Deep Learning Go Brrrr From First Principles.
+
+
+                                           Can we exploit the memory asymmetry to get speed up?
+                                    With IO-awareness (accounting for R/W to different levels of memory)   8
+How to Reduce HBM Reads/Writes: Compute by Blocks
+
+
+Challenges:                                            Approaches:
+
+(1) Compute softmax normalization without access       (1) Tiling: Restructure algorithm to load block by
+to full input.                                         block from HBM to SRAM to compute attention.
+
+(2) Backward without the large attention matrix from   (2) Recomputation: Don’t store attn. matrix
+forward.                                               from forward, recompute it in the backward.
+
+
+
+
+                                                                                                            9
+ Attention Computation Overview
+
+                                 𝑲𝑻
+
+
+
+
+                𝑸          𝑺 = 𝑸 𝑲𝑻
+
+
+
+                                                       Output
+
+
+
+                                                       𝑨
+                          𝑨 = exp(𝑺)     ∙   𝑽   =       ∙ 𝑽
+                                                       𝒍
+
+
+
+
+Softmax row-wise         𝒍 = ෍ exp 𝑺 𝒊
+normalization constant                           Compute by blocks: easy to split Q, but how do we split K & V? 10
+                             𝒊
+           st
+ Tiling – 1 Attempt: Computing Attention by Blocks
+ Goal:
+ Load each block from HBM to          (𝑲 𝟏 )𝑻                         (𝑲 𝟐 )𝑻                      Example: Split K into 2 blocks
+ SRAM & do local computation
+
+
+
+
+                                (𝟏)             𝟏   𝑻           (𝟐)               𝟐   𝑻
+                𝑸              𝑺      =𝑸 𝑲                 𝑺          =𝑸 𝑲
+
+
+
+                                                                                                                                       Output
+
+
+                                                                                                             𝑽(𝟏)                     𝑨(𝟏)
+                                                                                                                                           ∙ 𝑽𝟏
+                               𝑨(𝟏) = exp(𝑺(𝟏) )            𝑨(𝟐) = exp(𝑺(𝟐) )                  ∙                                =      𝒍
+                                                                                                                                      𝑨(𝟐)
+                                                                                                                                    +      ∙ 𝑽(𝟐)
+                                                                                                             𝑽(𝟐)                      𝒍
+
+
+
+Softmax row-wise                                    𝟏                     𝟐               Challenge: How to compute softmax normalization with just
+                               𝒍 = ෍ exp 𝑺                + ෍ exp 𝑺
+normalization constant                                  𝒊                     𝒊           local results?                                              11
+                                       𝒊                    𝒊
+          nd
+Tiling – 2 Attempt: Computing Attention by Blocks, with Softmax Rescaling
+Goal:                                                                                                Output we want:    𝒍 = ෍ exp 𝑺 𝟏         + ෍ exp 𝑺𝟐
+Load each block from HBM to                                                                                                                 𝒊            𝒊
+                                          (𝑲 𝟏 )𝑻                         (𝑲 𝟐 )𝑻                                             𝒊                  𝒊
+SRAM & do local computation                                                                                                𝑨(𝟏)       𝑨        (𝟐)
+                                                                                                                                   𝟏
+                                                                                                                        𝑶=      ∙ 𝑽 +                ∙ 𝑽(𝟐)
+                                                                                                                            𝒍           𝒍
+
+
+
+
+                                    (𝟏)             𝟏   𝑻                               𝑻
+                     𝑸             𝑺      =𝑸 𝑲                      (𝟐)
+                                                                    𝑺     =𝑸 𝑲      𝟐
+
+
+
+
+                                                                                                                                                             Wrong
+                                                                                                                                   Output                denominator 
+
+                                                                                                                                      (𝟏)
+                                                                                                                                   𝑨                         Local
+                                                                                                         𝑽(𝟏)                𝑶(𝟏) = (𝟏) ∙ 𝑽(𝟏)            computation
+                                                                                                                                    𝒍
+      Stored in HBM
+                                   𝑨(𝟏) = exp(𝑺(𝟏) )                𝑨(𝟐) = exp(𝑺(𝟐) )        ∙                         =           𝒍 (𝟏)
+      Computed in SRAM                                                                                                       𝑶(𝟐) = (𝟐) 𝑶(𝟏)                  Rescaling to
+      (not materialized in HBM)
+                                                                                                                                   𝒍
+                                                                                                         𝑽(𝟐)                      𝑨(𝟐)                         correct
+                                                                                                                                  + (𝟐) ∙ 𝑽(𝟐)                denominator
+                                                                                                                                    𝒍
+
+                                                                (𝟐)        (𝟏)               𝟐
+                                                                                                        Tiling + Rescaling allows local computation in SRAM, without
+                                  𝒍(𝟏) = ෍ exp 𝑺 𝟏              𝒍       =𝒍       + ෍ exp 𝑺       𝒊      writing to HBM, and get the right answer!
+                                                            𝒊                                                                                                         12
+                                           𝒊                                        𝒊
+Tiling
+Decomposing large softmax into smaller ones by scaling.
+
+
+                                                     1. Load inputs by blocks from HBM to SRAM.
+                                                     2. On chip, compute attention output with respect to
+                                                     that block.
+                                                     3. Update output in HBM by scaling.
+
+
+
+
+                                                                                                            13
+Animation credit: Francisco Massa
+Recomputation (Backward Pass)
+                                                                                                      Stored in HBM
+                                                                              𝑲𝑻
+                                                                                                      Recomputed in SRAM
+                                                                                                      (not materialized in HBM)
+
+
+
+
+By storing softmax normalization from forward (size N),
+quickly recompute attention in the backward from              𝑸             𝑺 = 𝑸 𝑲𝑻
+inputs in SRAM.
+
+                                                                                                            Output
+
+
+        Attention           Standard     FlashAttention
+                                                                                                           𝑨
+                                                                           𝑨 = exp(𝑺)     ∙   𝑽   =          ∙ 𝑽
+         GFLOPs               66.6        75.2 (↑13%)                                                      𝒍
+ HBM reads/writes (GB)        40.3         4.4 (↓9x)
+      Runtime (ms)            41.7         7.3 (↓6x)
+                                                                          𝒍 = ෍ exp 𝑺 𝒊
+                                                                              𝒊
+
+
+
+                         FlashAttention speeds up backward pass even with increased FLOPs.
+                                                                                                                         14
+FlashAttention: 2-4x speedup, 10-20x memory reduction
+
+
+
+
+                             2-4x speedup — with no approximation!
+                   10-20x memory reduction — memory linear in sequence length   15
+How has modern hardware changed
+and how can we redesign attention?
+
+
+
+
+                                     16
+                                       Summary
+Challenge: Optimizing FlashAttention for Modern Hardware
+
+     FlashAttention-2 is highly optimized on A100, reaching 70% utilization
+
+     But, FA-2 only gets to 35-40% utilization on H100!
+
+
+
+
+                                                                              17
+FlashAttention-3: Optimizing FlashAttention for Hopper Architecture
+Jay Shah*, Ganesh Bikshandi*, Ying Zhang, Vijay Thakkar, Pradeep Ramani, Tri Dao
+
+
+    1. New instructions on H100:
+       - WGMMA: higher throughput MMA primitive, async
+       - TMA: faster loading from gmem <-> smem, async, saves registers
+
+    2. Asynchrony
+       - Inter-warpgroup overlapping: warp-specialization, pingpong scheduling
+       - Intra-warpgroup overlapping: softmax and async matmul
+
+    3. Low-precision – FP8
+       - Solve for layout conformance, in-kernel V transpose
+
+    Plus: Persistent kernels, LPT scheduling for causal attention, GQA packing, MLA
+
+             Upshot: 1.6-3x speedup on Hopper, algorithmic ideas apply for Blackwell   18
+New Instructions on Hopper: WGMMA & TMA
+
+
+
+
+    wgmma necessary, mma.sync can                      TMA: accelerate gmem ->
+    only reach 2/3 peak throughput                     smem copy, saves registers
+
+                   Both WGMMA and TMA are asynchronous instructions:
+              threads issue them and can then do other work while they execute.
+                                                                                    19
+Asynchrony: Overlapping GEMM and Softmax
+
+Why overlap?
+
+Special Function Units (SFU) have very low throughput relative to Tensor Cores.
+
+Example: headdim 128, block size 128 x 128
+FP16 WGMMA: 2 x 2 x 128 x 128 x 128 = 8.4 MFLOPS, 4096 FLOPS/cycle -> 2048 cycles
+MUFU.EX2: 128 x 128 = 16k OPS, 16 OPS/cycle -> 1024 cycles
+
+
+                      MUFU.EX2 takes 50% the cycles of WGMMA!
+        FP8, or Blackwell is even worse: WGMMA and EX2 both take 1024 cycles.
+          We want to be doing EX2 while tensor cores are busy with WGMMA.
+
+                                                                                    20
+Inter-warpgroup Overlapping of GEMM and Softmax
+
+Easy solution: leave it to the warp schedulers!
+
+This works reasonably well, but we can do better.
+
+
+
+
+     Pingpong scheduling using synchronization barriers (with bar.sync):
+     580 TFLOPS -> 640 TFLOPS
+
+                                                                           21
+Intra-warpgroup Overlapping of GEMM and Softmax
+
+Per warpgroup, can finally exploit asynchrony of WGMMA.
+• Overlap GEMM1 for kth iteration with softmax for (k+1)th iteration.
+• Uses more registers since accumulator for next GEMM0 and operand for current
+  GEMM1 are now live concurrently.
+
+
+
+
+   2-stage intra-warpgroup overlapping: 640 TFLOPS -> 670 TFLOPS
+
+                                                                                 22
+Low-precision: FP8
+
+
+
+
+      FP8 Tensor Cores double WGMMA throughput, but trade off accuracy
+
+                                                                         23
+FP8 Attention with Incoherent Processing
+
+ Can multiply Q and K with a random orthogonal matrix (Hadamard) to "spread out"
+ the outliers.
+ Note: S = Q.K^T = (Q J)(K J)^T for orthogonal matrix J since J.J^T = I by definition.
+
+ Reduces quantization error by 2.6x on normally distributed QKV data with 0.1%
+ entries given large magnitude (to simulate outliers).
+
+
+
+
+                                                                                         24
+Persistent Kernels: Hiding Prologue & Epilogue
+
+
+Motivation: Tensor Cores are so fast, Prologue/Epilogue latency become non-trivial.
+
+
+
+
+Idea: Fixed number of CTAs (= num SMs), persistent across work tiles.
+• Asynchronous TMA store to overlap epilogue, prologue, and mainloop.
+
+
+
+
+                                                                                      25
+ Persistent Kernels: Hiding Prologue & Epilogue
+
+
+
+
+                 Prologue:                                        Epilogue:
+Work tile 1                            Mainloop
+              Load Q, first KV                                   Write O, LSE
+
+
+
+
+                                                 Prologue:                                  Epilogue:
+Work tile 2                                                                     Mainloop
+                                              Load Q, first KV                             Write O, LSE
+
+
+
+
+                                 Persistent kernels: 670 TFLOPS -> 700 TFLOPS
+                                                                                                          26
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Example: 2 batches, 3 workers (SMs)
+
+
+
+
+                                      27
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Example: 2 batches, 3 workers (SMs)
+
+
+               1
+
+               2
+T=1
+               3
+
+
+
+
+                                      28
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Example: 2 batches, 3 workers (SMs)
+
+
+               1
+
+               2     2
+T=2
+               3     3
+
+               1
+
+
+                                      29
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Example: 2 batches, 3 workers (SMs)
+
+
+               1                      2
+
+               2     2
+T=3
+               3     3     3
+
+               1     1
+
+
+                                          30
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Example: 2 batches, 3 workers (SMs)
+
+
+               1                      2
+
+               2     2                2
+T=4
+               3     3     3          3
+
+               1     1     1
+
+
+                                          31
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Example: 2 batches, 3 workers (SMs)
+
+
+               1                       2
+
+               2     2                 2   2
+T=5
+               3     3     3           3   3
+
+               1     1     1       1
+
+
+                                               32
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Example: 2 batches, 3 workers (SMs)
+
+
+               1                       2
+
+               2     2                 2   2
+T=6
+               3     3     3           3   3   3
+
+               1     1     1       1   1
+
+
+                                                   33
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Example: 2 batches, 3 workers (SMs)
+
+
+               1                       2
+
+               2     2                 2   2
+T=7
+               3     3     3           3   3   3
+
+               1     1     1       1   1   1
+
+
+                                                   34
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Example: 2 batches, 3 workers (SMs)
+
+
+               1                       2
+
+               2     2                 2   2
+T=8
+               3     3     3           3   3   3
+
+               1     1     1       1   1   1   1
+
+
+                                                   35
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Example: 2 batches, 3 workers (SMs)
+
+
+               1                                        2
+
+               2      2                                 2      2
+T=9
+               3      3      3                          3      3      3
+
+               1      1      1      1                   1      1      1     1
+
+          Work distribution: [9, 5, 6] blocks. Longest tile is always scheduled last!   36
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Idea: Assign work to workers using longest-processing-time-first
+
+
+
+
+                                                                   37
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Idea: Assign work to workers using longest-processing-time-first
+
+
+
+
+                                                                   38
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Idea: Assign work to workers using longest-processing-time-first
+
+
+
+
+T=1
+               3
+
+               1                                      2
+
+
+                                                                   39
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Idea: Assign work to workers using longest-processing-time-first
+
+
+
+
+T=2
+               3      3
+
+               1      1                               2     2
+
+
+                                                                   40
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Idea: Assign work to workers using longest-processing-time-first
+
+
+
+
+T=3
+               3      3     3
+
+               1      1     1                         2     2      2
+
+
+                                                                       41
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Idea: Assign work to workers using longest-processing-time-first
+
+
+
+
+T=4
+               3      3     3                         3
+
+               1      1     1      1                  2     2      2   2
+
+
+                                                                           42
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Idea: Assign work to workers using longest-processing-time-first
+
+
+
+
+               1                                      2
+T=5
+               3      3     3                         3     3
+
+               1      1     1      1                  2     2      2   2
+
+
+                                                                           43
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Idea: Assign work to workers using longest-processing-time-first
+
+
+
+
+               1      1                               2     2
+T=6
+               3      3     3                         3     3      3
+
+               1      1     1      1                  2     2      2   2
+
+
+                                                                           44
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Idea: Assign work to workers using longest-processing-time-first
+
+
+               1                                         2
+
+               1      1                                  2     2
+T=7
+               3      3      3                           3     3      3
+
+               1      1      1     1                     2     2      2   2
+
+                   Work distribution: [7, 7, 6] vs [9, 5, 6] previously       45
+Load Balancing: Causal Attention
+
+Challenge: Unequal work per tile
+Idea: Assign work to workers using longest-processing-time-first
+
+Caveat: Take care to not spill L2 cache (using L2 swizzling)
+
+
+
+
+                     Causal attention speed 670 TFLOPS -> 730 TFLOPS   46
+BF16 Benchmark: 1.8-2.2x speedup
+
+
+
+
+                     Without causal mask                    With causal mask
+
+
+CUDA tool kit 12.8
+Triton 3.1
+cuDNN 9.6               Causal Attention 730-750 TFLOPS ≈ Matmul speed!        47
+BF16 Benchmark: Reach up to 840 TFLOPS!
+
+
+
+
+                     Without causal mask   With causal mask
+
+
+CUDA tool kit 12.8
+Triton 3.1
+cuDNN 9.6
+                                                              48
+FP8 Benchmark: Up to 1.3 PFLOPS!
+
+
+
+
+                     Without causal mask   With causal mask
+
+
+CUDA tool kit 12.8
+Triton 3.1
+cuDNN 9.6
+                                                              49
+FlashAttention 4: Algo-Kernel Co-design for Asymmetric Hardware Scaling
+ Aka The Rise of Asymmetric Scaling in Blackwell GPUs
+       Blackwell matmul units get faster, but exponential units and shared memory stay the same speed
+
+
+
+
+                      Attn fwd bottlenecked by exponential, bwd bottlenecked by smem traffic!
+Ted Zadouri*, Markus Hoehnerbach*, Jay Shah*, Timmy Liu, Vijay Thakkar, Tri Dao.
+                                                                                                           50
+FlashAttention-4: Algorithm and kernel pipelining co-design for asymmetric hardware scaling. MLSys 2026.
+ Forward Pass: Redesigned Algorithm to Go Beyond Hardware Limits
+
+
+
+
+Algo changes:
+1. Pingpong pipeline of query tiles
+2. Exp emulation with polynomials
+(Chebyshev!)
+3. New variant of online softmax
+to skip 90% of rescaling
+Backward Pass: New 2CTA MMA Instructions to Reduce Smem Bandwidth
+
+
+
+
+               Careful synchronization and data movement for 2 CTAs to cooperate
+FlashAttention 4 Perf: Forward Pass
+
+                                                                                  Collab
+                                                                         Newer cuDNN versions now
+                                                                           incorporate many FA4
+                                                                               optimizations
+
+
+
+
+     Attn as optimized as matmul (up to 1600 TFLOPS), despite new
+  bottlenecks, thanks to insights from algos + hardware understanding!
+                                                                                                53
+FlashAttention 4 Perf: Backward Pass
+
+
+
+
+              4x speedup compared to FA2 baseline with no Blackwell optimizations
+                                                                                    54
+     Written in Cute-DSL, huge FlexAttention speedup
+
+
+
+
+    Abstractions from FA4 (block sparse, masking) + Python-embedded DSL
+                -> 2.7-3.0x FlexAttn speedup across the board
+                                                                                                                          55
+Driss Guessous, Markus Hoehnerbach, Ted Zadouri, Jay Shah, Tri Dao, and others. Bringing muscle to FlexAttention. 2026.
+ FlashAttention 4 on Blackwell
+
+
+
+
+cuDNN 9.11.0
+CTK 13.0
+
+
+https://github.com/Dao-AILab/flash-attention/blob/main/flash_attn/cute/flash_fwd_sm100.py
+                                                                                            56
+How to optimize attention
+     for inference?
+
+
+
+
+                            57
+Optimizations for Decoding Inference: Old and New
+
+For decoding, query length is short (on the order of a few tokens), while context length is
+long (for example, 128k).
+
+
+
+
+ From FA-2, have Flash Decoding: split along the KV sequence length to occupy
+ the GPU with enough work.
+                                                                                              58
+GQA Packing: compute for multiple query heads per KV head
+WGMMA tile is 64 wide in the M dimension. This is wasted for short query length!
+However, we can pack multiple query heads to fill out WGMMA tile for MQA/GQA.
+
+
+
+
+ FA-2 already did this for the case of one query token, which is a simple reshape.
+ In FA-3, we extend to the more involved case of arbitrary query length.
+ • Also benefits some compute-bound situations with tile quantization effects
+                                                                                     59
+BF16 Decode Benchmark for MQA. Lower is better!
+
+
+
+
+                                                  60
+                                                 Summary
+Summary – FlashAttention
+
+Fast and accurate attention optimized for modern hardware
+
+Key algorithmic ideas: asynchrony, low-precision
+- Persistent kernels with LPT scheduling for causal attention
+- For inference: Split KV (Flash-Decoding) and GQA packing
+
+Upshot: faster training, better models with longer sequences
+
+
+
+
+Code:
+https://github.com/Dao-AILab/flash-attention
+https://github.com/NVIDIA/cutlass/tree/main/examples/77_blackwell_fmha
+
+                                                                         63
+

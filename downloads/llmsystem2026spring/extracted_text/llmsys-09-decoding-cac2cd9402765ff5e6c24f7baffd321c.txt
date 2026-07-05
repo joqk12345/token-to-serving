@@ -1,0 +1,693 @@
+       Decoding
+Sampling, Beam Search and
+  Speculative Decoding
+          Lei Li
+
+
+
+                            1
+           Recap about Tokenization
+• Subword tokenization: Byte-Pair-Encoding
+  o iteratively merging most frequent pairs of tokens
+
+• Information-theoretic vocabulary (VOLT)
+  o solving entropy constrained optimal transport problem
+
+• Pre-tokenization through regex
+
+• Number treatment
+
+• Vocab sharing impact multilingual performance
+  o how to solve languages in stagnant quad                 2
+                          Outline
+• Sequence Decoding overview
+
+• Beam search algorithm
+
+• Accelerating Generation: Speculative Decoding
+
+• Further Improvement: EAGLE speculative decoding
+
+
+
+
+                                                    3
+                Sequence Decoding
+                    argmax𝑃(𝑦|x) = 𝑓𝜃 (𝑥, 𝑦)
+                            𝑦
+
+• naive solution: exhaustive search over all sequences
+  o too expensive O(𝑉 𝑁 )
+
+• Greedy (max) decoding
+
+• Sampling
+
+• Beam search
+  o (approximate) dynamic programming
+                                        Greedy Decoding
+                      Softmax           choose next token
+                                        with highest prob.
+       logits
+                                                         yes
+                        Linear               [EOS]?
+                                                         output
+             Feed Forward Network           no
+         Multihead Attention (masked)
+
+             Feed Forward Network
+
+         Multihead Attention (masked)
+
+     Token Embedding + Pos Embedding
+
+Input: A long time ago in a galaxy                                5
+                    Max Decoding
+• For every next token, pick the one that maximizes the
+  probability
+                      max 𝑝 𝑥𝑡 𝑥1…𝑡−1
+
+• equivalent to maximizing logits, no need to normalize
+
+
+
+
+                                                          6
+                        Sampling
+• Instead of argmaxy 𝑃(𝑦|𝑥) = 𝑓𝜃 (𝑥, 𝑦)
+
+• Generate samples of translation Y from the distribution
+  P(Y|X)
+
+• Q: how to generate samples from a discrete distribution?
+                Discrete Sampling
+• sample n values x’s from k categories, with prob. p1, p2, …
+  pk
+
+• Direct sampling: 𝑂(𝑛𝑘)
+
+• Binary Search: 𝑂 𝑘 + 𝑛log𝑘
+
+• Alias sampling: 𝑂(𝑘log𝑘 + 𝑛)
+probs = torch.softmax(logits, dim=-1)
+next_token = torch.multinomial(probs, num_samples=1)
+
+                                                                8
+        Fast Sampling with Gumbel Max Trick
+      • sampling from Categorical(Softmax ℎ ) is equivalent to
+                               arg max 𝑥
+                            𝑧~Uniform 0,1
+                          𝑥 = ℎ − log − log 𝑧
+
+      • Theory: x follows Gumbel distribution, and argmax x follows
+                      exp ℎ𝑖
+        Categorical( 𝑘       )
+                                 σ𝑗=1 ℎ𝑗
+
+
+
+https: //timvieira.github.io/blog/post/2014/ 08/01/gumbel-max-trick-and-weightedreservoir-sampling/
+Stochastic Beams and Where to Find Them: The Gumbel-Top-k Trick for Sampling Sequences Without Replacement. Kool et al. ICML 2019   9
+class GumbelSampler:
+  def __init__(self, batch_size, vocab_size, device):
+    self.batch_size = batch_size
+    self.vocab_size = vocab_size
+    # Pre-compute noise
+    self.noise = self._prepare_gumbel_noise(device)
+
+  def _prepare_gumbel_noise(self, device):
+    # Generate noise tensor once
+    uniform_noise = torch.rand(self.batch_size,
+self.vocab_size, device=device)
+    return -torch.log(-torch.log(uniform_noise))
+
+ def sample(self, logits):
+   # Direct sampling without softmax
+   return torch.argmax(logits + self.noise, dim=-1)
+
+                                                        10
+                          Outline
+• Sequence Decoding overview
+
+• Beam search algorithm
+
+• Accelerating Generation: Speculative Decoding
+
+• Further Improvement: EAGLE speculative decoding
+
+
+
+
+                                                    11
+                    Beam Search
+Find approximate solutions to argmax𝑃(𝑦|x) = 𝑓𝜃 (𝑥, 𝑦)
+                                   𝑦
+
+1. start with empty S
+
+2. at each step, keep k best partial sequences
+
+3. expand them with one more forward generation
+
+4. collect new partial results and keep top-k
+                                 Beam Search
+                               forward by                                  forward by
+                               network                                     network
+                                 like   0.4             top-k              singing 0.6
+                                                                                                            top-k
+          forward by            love    0.4                                 song    0.2
+          network                am     0.1
+                                              I like 0.16
+                                                                           shouting 0.01
+                                              I love 0.16
+decoder                top-k    hate 0.01                                   going 0.01     I like singing 0.096
+                                                                                           I like song 0.032
+input      I    0.4             want 0.01                                  dancing 0.01
+           We   0.3   I 0.4
+<BOS>                                                        I like 0.16
+           He   0.1   We 0.3
+                               forward by                    I love 0.16
+          She   0.1
+                               network                                     forward by
+          They 0.01
+                                 like   0.4                                network
+                                 do     0.3                                singing 0.5
+                                              We like 0.12
+                                 are    0.2                                dancing 0.3     I love singing 0.08
+                                              We do 0.09
+                                                                             you   0.11    I love dancing 0.048
+                                 can 0.01
+                                 say 0.01                                   going 0.01
+                                                                              it   0.01
+best_scores = []
+add {[0], 0.0} to best_scores # 0 is for beginning of sentence token
+for i in 1 to max_length:
+  new_seqs = PriorityQueue()
+  for (candidate, s) in best_scores:
+    if candidate[-1] is EOS:
+      prob = all -inf
+      prob[EOS] = 0
+    else:
+      prob = using model to take candidate and compute next token probabilities (logp)
+    pick top k scores from prob, and their index
+    for each score, index in the top-k of prob:
+      new_candidate = candidate.append(index)
+      new_score = s + score
+      if not new_seqs.full():
+        add (new_candidate, new_score) to new_seqs
+      else:
+        if new_seqs.queue[0][1] < new_score:
+          new_seqs.get() # pop the one with lowest score
+          add (new_candidate, new_score) to new_seqs
+               Pruning for Beam Search
+• Relative threshold pruning
+  o prune candidates with too low score from the top one
+  o Given a pruning threshold rp and an active candidate list C, a
+    candidate cand ∈ C is discarded if: score(cand) ≤ rp ∗
+    max{score(c)}
+
+• Absolute threshold pruning:
+  o score(cand) ≤ max{score(c)} − ap
+
+• Relative local threshold pruning
+     Freitag & Al-Onaizan. Beam Search Strategies for Neural Machine Translation. 2017.
+   Combine Sample and Beam Search
+• Sample the first tokens
+
+• continue beam search for the later
+
+• why?
+  o to improve sequence diversity
+        Beam Search Code example
+• https://github.com/llmsystem/llmsys_code_examples/blob/m
+  ain/decoding/decoding.ipynb
+
+
+
+
+                                                             17
+              Quiz 5.2
+• on canvas
+
+
+
+
+                         18
+                          Outline
+• Sequence Decoding overview
+
+• Beam search algorithm
+
+• Accelerating Generation: Speculative Decoding
+
+• Further Improvement: EAGLE speculative decoding
+
+
+
+
+                                                    23
+ LLM Autoregressive Decoding is slow
+• need to generate one token at the time in a sequential
+  manner and each token can take 100s of milliseconds
+
+
+
+
+              https://medium.com/ai-science/speculative-decoding-make-llm-inference-faster-c004501af120   24
+Accelerating with Speculative Decoding
+• Commonly used to reduce latency in LLMs inference
+  applications
+
+
+
+
+                   https://aclanthology.org/2024.findings-acl.456.pdf   25
+                                         Speculative Decoding
+       • Key idea: use a small model
+         (draft model) to generate N
+         “drafty” tokens and then                         Target model (big)
+
+         leverage the large model
+                                                                     Autoregressive
+         (target model) to validate                                   generation
+         them
+                                                          Draft model (small)
+       • 𝑦1:𝑘 = (𝑦1 , 𝑦2 , . . . , 𝑦𝑘 ) ∼
+         𝑓draft (⋅ |𝑥)
+
+https://aclanthology.org/2024.findings-acl.456.pdf                                    26
+                                         Speculative Decoding
+       • Key idea: use a small model
+         (draft model) to generate N
+         “drafty” tokens and then                         Target model (big)
+
+         leverage the large model
+                                                                     Autoregressive
+         (target model) to validate                                   generation
+         them
+                                                          Draft model (small)
+       • 𝑦1:𝑘 = (𝑦1 , 𝑦2 , . . . , 𝑦𝑘 )
+         ∼ 𝑓draft (⋅ |𝑥)
+
+https://aclanthology.org/2024.findings-acl.456.pdf                                    27
+                                         Speculative Decoding
+       • Key idea: use a small model (draft
+         model) to generate N “drafty”
+         tokens and then leverage the                     Target model (big)
+         large model (target model) to
+         validate them                                               Autoregressive
+                                                                      generation
+       • 𝑦1:𝑘 = (𝑦1 , 𝑦2 , . . . , 𝑦𝑘 )
+         ∼ 𝑓draft (⋅ |𝑥)                                  Draft model (small)
+
+
+
+
+https://aclanthology.org/2024.findings-acl.456.pdf                                    28
+                                         Speculative Decoding
+       • Key idea: use a small model
+         (draft model) to generate N
+         “drafty” tokens and then                         Target model (big)
+
+         leverage the large model
+                                                                     Autoregressive
+         (target model) to validate                                   generation
+         them
+                                                          Draft model (small)
+       • 𝑦1:𝑘 = (𝑦1 , 𝑦2 , . . . , 𝑦𝑘 )
+         ∼ 𝑓draft (⋅ |𝑥)
+
+https://aclanthology.org/2024.findings-acl.456.pdf                                    29
+                                         Speculative Decoding
+       • Key idea: use a small model
+         (draft model) to generate N
+         “drafty” tokens and then                         Target model (big)
+
+         leverage the large model
+         (target model) to validate
+         them
+                                                          Draft model (small)
+       • 𝑦1:𝑘 = (𝑦1 , 𝑦2 , . . . , 𝑦𝑘 )
+         ∼ 𝑓draft (⋅ |𝑥)
+
+https://aclanthology.org/2024.findings-acl.456.pdf                              30
+                                         Speculative Decoding
+       • You use a small model (draft
+         model) to generate N “drafty”
+         tokens and then leverage the                     Target model (big)
+
+         large model (target model) to
+         validate them
+
+       • 𝑦1:𝑘 = (𝑦1 , 𝑦2 , . . . , 𝑦𝑘 ) ∼                 Draft model (small)
+         𝑓𝑑𝑟𝑎𝑓𝑡 (⋅ |𝑥)
+
+
+https://aclanthology.org/2024.findings-acl.456.pdf                              31
+                                         Speculative Decoding
+       • Key idea: use a small model
+         (draft model) to generate N
+         “drafty” tokens and then                         Target model (big)
+
+         leverage the large model
+         (target model) to validate
+         them
+                                                          Draft model (small)
+       • 𝑦1:𝑘 = (𝑦1 , 𝑦2 , . . . , 𝑦𝑘 )
+         ∼ 𝑓draft (⋅ |𝑥)
+
+https://aclanthology.org/2024.findings-acl.456.pdf                              32
+                                         Speculative Decoding
+       • Key idea: use a small model                      Target model (big)
+         (draft model) to generate N
+         “drafty” tokens and then                          N “drafty” tokens
+         leverage the large model
+         (target model) to validate
+         them
+                                                          Draft model (small)
+       • 𝑦1:𝑘 = (𝑦1 , 𝑦2 , . . . , 𝑦𝑘 )
+         ∼ 𝑓draft (⋅ |𝑥)
+
+https://aclanthology.org/2024.findings-acl.456.pdf                              33
+                                         Speculative Decoding
+       • Key idea: use a small model                    Parallel validation of tokens
+         (draft model) to generate N
+         “drafty” tokens and then                             Target model (big)
+
+         leverage the large model
+         (target model) to validate
+         them
+                                                             Draft model (small)
+       • 𝑦1:𝑘 = (𝑦1 , 𝑦2 , . . . , 𝑦𝑘 )
+         ∼ 𝑓draft (⋅ |𝑥)
+
+https://aclanthology.org/2024.findings-acl.456.pdf                                      34
+              Speculative Decoding
+• Each drafty token is considered valid if it is among the top-k
+  predictions of the target LLM
+
+• It computes the probability of each draft token under its own
+  distribution 𝑓𝑡𝑎𝑟𝑔𝑒𝑡 (⋅ |𝑥, 𝑦1:𝑖−1 )
+
+• Accept token if 𝑦𝑖 ∈ 𝑇𝑜𝑝𝐾(𝑓𝑡𝑎𝑟𝑔𝑒𝑡 (⋅ |𝑥, 𝑦1:𝑖−1 ))
+
+
+
+                                                                   35
+                                         Speculative Decoding
+       • Target model accepts each
+         token only if it lies in the top-k
+         predictions                                      Target model (big)
+
+
+       • Accept if 𝑦𝑖 ∈
+         𝑇𝑜𝑝𝐾(𝑓𝑡𝑎𝑟𝑔𝑒𝑡 (⋅ |𝑥, 𝑦1:𝑖−1 ))
+                                                          Draft model (small)
+
+
+
+
+https://aclanthology.org/2024.findings-acl.456.pdf                              36
+                                         Speculative Decoding
+       • If a drafty token is rejected,
+         the target model will start
+         generating on its own                            Target model (big)
+
+         starting from the last
+         accepted token
+
+                                                          Draft model (small)
+
+
+
+
+https://aclanthology.org/2024.findings-acl.456.pdf                              37
+                                         Speculative Decoding
+       • If a drafty token is rejected,
+         the target model will start
+         generating on its own                            Target model (big)
+
+         starting from the last good
+         token
+
+
+
+
+https://aclanthology.org/2024.findings-acl.456.pdf                             38
+  Why is Speculative Decoding faster?
+• Speculative decoding achieves a speed up compared to
+  sequential decoding because it is faster to validate
+  tokens than to generate them from scratch
+
+
+
+
+                                                         39
+                                                     Why is it faster?
+       • To generate N tokens, you need to run N forward passes in
+         an autoregressive way
+
+
+
+
+https://medium.com/ai-science/speculative-decoding-make-llm-inference-faster-c004501af120   40
+                  Why is it faster?
+• In the speculative decoding setting, you
+  are looking at the likelihood of a token
+  given the previous ones
+
+• With causal attention you are able to
+  compute that likelihood for N tokens in a
+  single forward pass
+
+
+
+                                              41
+   Speculative Decoding Performance
+• By using TopK validation of each draft token we make sure
+  the generated sequence cannot deviate too much from
+  the target model’s result
+
+• Any mismatch in token distribution between target and
+  draft models is corrected by having the target model
+  generating the rest of the N tokens
+
+
+
+                                                              42
+   Speculative Decoding generates good text
+
+
+
+
+https://aclanthology.org/2023.findings-emnlp.257.pdf   43
+                      Speculative Decoding is faster
+
+
+
+
+https://aclanthology.org/2023.findings-emnlp.257.pdf   44
+                 How to choose N?
+• This comes as a tradeoff
+
+• Pros of a big N: can theoretically achieve more speed up
+
+• Cons of a big N: higher chances of getting a rejected token,
+  higher cost of a rejection, need to compute more softmax
+  over the vocab (potential memory bottlenecks), longer stall
+  times for real-time applications like chat bots
+
+• Popular choices are N = 4, 8
+
+                                                                 45
+           Alignment considerations
+• The draft model is said to be well aligned with the target
+  model when the rejection rate of the drafty tokens is
+  low
+
+• Good alignment is key for performance as the speedup is
+  canceled when a rejection happens
+
+• Choosing models from the same family as draft-target pairs
+  is common and usually shows good results
+
+                                                               46
+                          Outline
+• Sequence Decoding overview
+
+• Beam search algorithm
+
+• Accelerating Generation: Speculative Decoding
+
+• Further Improvement: EAGLE speculative decoding
+
+
+
+
+                                                    47
+      Improving Speculative Decoding
+                                         can        I         help
+
+• Vanilla speculative decoding uses a
+                                                Sampling
+  small LM as drafting model which
+  predicts the next token                        LM Head
+
+                                         𝑓𝐻𝑜𝑤      𝑓𝑐𝑎𝑛        𝑓𝐼
+• Observation: the next LLM final
+  layer feature is simpler to predict
+  than next token                               Transformer
+
+
+
+• EAGLE directly predicts the next       𝑒𝐻𝑜𝑤      𝑒𝑐𝑎𝑛        𝑒𝐼
+
+  LLM final layer feature with a small          Embedding
+  model
+                                         How       can          I
+                                                                     48
+                  EAGLE Overview
+                         make/
+can          I            help        a/our        with/you
+
+  Sampling                       Sampling
+
+                                                                         How can
+   LM Head                        LM Head
+
+𝑓𝐻𝑜𝑤      𝑓𝑐𝑎𝑛            𝑓𝐼          𝑓𝑚𝑎𝑘𝑒          𝑓ℎ𝑒𝑙𝑝                  I
+
+
+                                                                  make             help
+                        Single Transformer Layer
+  Transformer
+
+                 𝑓𝐻𝑜𝑤    𝑓𝑐𝑎𝑛           𝑓𝐼            𝑓𝐼      a      our        with   you
+
+𝑒𝐻𝑜𝑤      𝑒𝑐𝑎𝑛   𝑒𝑐𝑎𝑛     𝑒𝐼          𝑒𝑚𝑎𝑘𝑒         𝑒ℎ𝑒𝑙𝑝
+
+
+  Embedding                      Embedding
+
+
+How        can   can       I          make          help                                     49
+EAGLE: Word Embedding + Final Layer Feature
+ • The sampled token affects the final layer feature a lot
+
+ • “begin” cannot appear after “I am”
+
+                                            excited
+
+                                am
+                                            ready
+
+                     I
+                                            begin
+
+                               always
+                                             look
+
+
+                                                             50
+Efficient Implementation with Tree Attention
+ • Drafted tokens are flattened on input with tree shaped
+   attention mask
+                                        How   can   I   make   help   a   our   with   you
+
+
+             How can             How     1
+
+                                 can     1    1
+
+                I                 I      1    1     1
+
+                                 make    1    1     1    1
+      make             help      help    1    1     1           1
+
+                                  a      1    1     1    1            1
+  a      our        with   you
+                                 our     1    1     1    1                1
+
+                                 with    1    1     1           1                1
+
+                                 you     1    1     1           1                       1
+                                                                                             51
+                   EAGLE Training
+• Autoregressive training with both smooth L1 loss on final
+  layer feature and cross entropy loss on token distribution
+
+• 𝐿 = 𝐿𝑟𝑒𝑔 + 𝑤𝑐𝑙𝑠 𝐿𝑐𝑙𝑠
+
+• 𝐿𝑟𝑒𝑔 = Smooth L1 𝑓𝑖+1 , Draft_Model 𝑇2:𝑖+1 , 𝐹1:𝑖
+
+• 𝑇2:𝑖+1 are token embeddings and 𝐹1:𝑖 = 𝑓1 , ⋯ , 𝑓𝑖
+
+
+                                                               52
+                         EAGLE Training
+• Autoregressive training with both smooth L1 loss on final layer feature
+  and cross entropy loss on token distribution
+
+• 𝐿 = 𝐿𝑟𝑒𝑔 + 𝑤𝑐𝑙𝑠 𝐿𝑐𝑙𝑠
+
+• 𝑝𝑖+2 = Softmax LM_head 𝑓𝑖+1
+
+  ^                           ^
+• 𝑝𝑖+2 = Softmax LM_head 𝑓𝑖+1
+                              ^
+• 𝐿𝑐𝑙𝑠 = Cross_Entropy 𝑝𝑖+2 , 𝑝𝑖+2
+
+
+                                                                            53
+Much Faster Decoding on MT-Bench
+
+
+
+
+                                   54
+      Futher Improvement on EAGLE
+• EAGLE-2 prunes the tokens in tree with low confidence
+
+• EAGLE-3 scales the method to larger training data
+
+• Feel free to check the papers!
+
+
+
+
+                                                          55
+                        Demo
+• https://github.com/llmsystem/llmsys_code_examples/blob/m
+  ain/speculative_decoding/Speculative_decoding_demo.ipyn
+  b
+
+• https://github.com/llmsystem/llmsys_code_examples/blob/m
+  ain/speculative_decoding/EAGLE/demo.py
+
+
+
+
+                                                             56
+              Quiz 5.3
+• on canvas
+
+
+
+
+                         57
+                              Summary
+• Beam Search decoding: approximate dynamic programming to keep a
+  beam of partial sequences.
+
+• Speculative decoding makes LLMs decoding phase faster
+   o key idea: It uses a draft model to generate tokens and uses the target model
+     to validate them
+   o The speed up comes because validating tokens is faster than generating
+     them
+
+• EAGLE: use the original LM’s embedding and LM head, and a small
+  Transformer layer to predict the final layer features for prediction
+   o implementing with tree attention mask
+
+                                                                                    58
+

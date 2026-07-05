@@ -1,0 +1,1159 @@
+ 11868 LLM Systems
+Memory Optimization in
+ Distributed Training
+         Lei Li
+                             Outline
+• Memory Consumption for LLM training
+
+• Partitioning and reducing the memory for data parallel
+  training
+  o Partition optimizer states
+  o Partition gradients
+  o Partition parameters
+
+• Other memory optimizations
+
+                                                           2
+           Distributed Data Parallel Training
+                worker               worker          worker          worker
+
+
+       1
+       partition
+Data
+                   2                  2               2               2
+
+            local grad           local grad     local grad       local grad
+
+                         34   AllReduce (compute average grad)
+            4                    4               4               4
+            param update         param update    param update    param update   3
+                     Model Parallel Training
+   Model Parallel: memory usage and computation of a model
+   is distributed across multiple workers.
+   Distributed layer-wise computation   Distributed tensor computation
+
+                         loss
+device 3, layer 3   F3          B3
+device 2, layer 2   F2          B2
+device 1, layer 1   F1          B1
+device 0, layer 0   F0          B0
+
+                     grad update
+                                                                         4
+Comparing Data and Model Parallelism
+                    Pros                     Cons
+
+Model Parallelism   Good memory efficiency   Poor compute
+                                             /communication
+                                             efficiency
+                                             (5% of peak perf in
+                                             training 40B model with
+                                             Megatron)
+
+Data parallelism    Good                  Poor memory efficiency
+                    compute/communication (Every device has one
+                    efficiency            copy of model)
+                                                                       5
+Memory Consumption in DDP (Mixed Precision)
+Each GPU needs to store (20N + act)              Adam Optimizer
+                                       𝑚𝑡+1 = 𝛽1 𝑚𝑡 − (1 − 𝛽1 )𝛻ℓ(𝑥𝑡 )
+• Model parameters (N * 2 bytes)       𝑣𝑡+1 = 𝛽2 𝑣𝑡 + (1 − 𝛽2 )(𝛻ℓ(𝑥𝑡 ))2
+                                                  𝑚𝑡+1
+                                       𝑚ෝ 𝑡+1 =
+• Forward activation for each layer (d          1 − 𝛽1𝑡+1
+  * len * b * n_layer)                 𝑣ො𝑡+1 =
+                                                 𝑣𝑡+1
+                                               1 − 𝛽2𝑡+1
+• Backward gradients (N * 2 bytes)                       𝜂
+                                       𝑥𝑡+1 = 𝑥𝑡 −              𝑚
+                                                                ෝ 𝑡+1
+                                                      𝑣ො𝑡+1 + 𝜖
+• Optimizer state (for Adam) N * 4 * 4
+  o parameters, gradients, momentum,
+    variance
+              DDP Memory Consumption
+
+        Transformer Layers           Transformer layers
+Data0                        Data1
+
+              GPU0                         GPU1
+
+
+
+ Example: two data partitions on two GPUs
+
+ • 16 layer Transformer Model
+                                                          7
+              DDP Memory Consumption
+
+        Transformer Layers           Transformer layers
+Data0                        Data1
+
+              GPU0                         GPU1
+
+
+
+
+ • Each cell represents GPU memory used by the
+   corresponding transformer layer                        8
+              DDP Memory Consumption
+
+        Transformer Layers                        Transformer layers
+Data0                        FP16 Param
+                                          Data1                        FP16 Param
+
+
+              GPU0                                      GPU1
+
+ • Each cell represents GPU memory used by the
+   corresponding transformer layer
+
+ • FP16 parameters, FP16 Gradients, FP32 Optimizer States
+   (Gradients, Variance, Momentum, Parameters)                                      9
+              DDP Memory Consumption
+
+        Transformer Layers                        Transformer layers
+Data0                                     Data1
+                             FP16 Parameters                           FP16 Parameters
+                             FP16 Gradient                             FP16 Gradient
+
+
+              GPU0                                      GPU1
+
+ • Each cell represents GPU memory used by the
+   corresponding transformer layer
+
+ • FP16 parameters, FP16 Gradients, FP32 Optimizer States
+   (Gradients, Variance, Momentum, Parameters)                                           10
+              DDP Memory Consumption
+
+        Transformer Layers                       Transformer layers
+Data0                                    Data1
+                             FP16 Parameters                          FP16 Parameters
+                             FP16 Gradient                            FP16 Gradient
+                             FP32 Gradient                            FP32 Gradient
+
+              GPU0                                     GPU1
+                             FP32 Variance                            FP32 Variance
+                             FP32 Momentum                            FP32 Momentum
+                             FP32 Parameters                          FP32 Parameters
+
+
+
+
+ • Each cell represents GPU memory used by the
+   corresponding transformer layer
+
+ • FP16 parameters, FP16 Gradients, FP32 Optimizer States
+   (Gradients, Variance, Momentum, Parameters)                                          11
+               DDP Memory Usage
+
+LLaMA-3 8B                    GPT-3 175B
+
+•   Parameters: 16GB          •   Parameters: 350GB
+
+•   Gradients: 16GB           •   Gradients: 350GB
+
+•   Optimizer states: 128GB   •   Optimizer states: 2800GB
+
+•   Total: 160GB              •   Total: 3500GB
+                                                             12
+         Other Memory Usages in DDP
+
+•   Temporary Buffers:
+    o   Storing intermediate results. Operations such as gradient all-
+        reduce, or gradient norm computation tend to fuse all the
+        gradients into a single flattened buffer before applying the
+        operation in an effort to improve throughput.
+
+•   Memory Fragmentation:
+    o   In extreme cases can be 30%.
+
+                                                                         13
+Goal: Reduce Memory Usage
+in DDP ➔ Training Extremely
+       Large Models
+
+
+                              14
+                             Outline
+• Memory Consumption for LLM training
+
+• Partitioning and reducing the memory for data parallel
+  training
+  o Partition optimizer states
+  o Partition gradients
+  o Partition parameters
+
+• Other memory optimization
+
+                                                           15
+Common Approaches to Reduce Memory
+• ZeRO: Partition Optimizer States, Gradients, Parameters
+
+• Reducing Activation Memory
+  o Activation Checkpoint, Compression
+
+• CPU Offload
+  o Requires CPU-GPU-CPU transfer, which can take 50% time
+
+• Memory Efficient Optimizer
+  o Maintaining coarser-grained statistics of model parameters and
+    gradients                                                        16
+  ZeRO - Zero Redundancy Optimizer
+
+• Key idea:
+  o Eliminating data redundancy in DDP by partitioning the optimizer
+    states (zero-1), gradients (zero-2), parameters (zero-3)
+
+• Widely used for large language model training.
+  o 7B model memory: 120GB ➔ 30GB (with 4GPUs)
+
+• Implemented in Deepspeed.
+
+
+  Rajbhandari et al. ZeRO: memory optimizations toward training trillion parameter models. SC 2020.   17
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+              Activations                 Activations
+           Transformer stack           Transformer stack
+Data0                          Data1
+
+              GPU0                        GPU1
+
+
+
+
+                                                           18
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+               Activations                              Activations
+            Transformer stack                        Transformer stack
+Data0                                        Data1
+                                FP16 Parameters                          FP16 Parameters
+
+
+               GPU0                                     GPU1
+
+
+
+  • Partition the optimizer states to K parts, each GPU process
+    one partition
+
+  • forward pass to produce activations and loss (by fp16
+    parameters)                                                                            19
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+               Activations                              Activations
+            Transformer stack                        Transformer stack
+Data0                                        Data1
+                                FP16 Parameters                          FP16 Parameters
+
+
+               GPU0                                     GPU1
+
+
+
+
+  • forward pass to produce activations and loss (by fp16
+    parameters)
+
+
+                                                                                           20
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+               Activations                              Activations
+            Transformer stack                        Transformer stack
+Data0                                        Data1
+                                FP16 Parameters                          FP16 Parameters
+
+
+               GPU0                                     GPU1
+
+
+
+  • forward pass to produce activations and loss (by fp16
+    parameters)
+
+
+                                                                                           21
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+               Activations                              Activations
+            Transformer stack                        Transformer stack
+Data0                                        Data1
+                                FP16 Parameters                          FP16 Parameters
+
+
+               GPU0                                     GPU1
+
+
+
+  • forward pass to produce activations and loss (by fp16
+    parameters)
+
+
+                                                                                           22
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+               Activations                              Activations
+            Transformer stack                        Transformer stack
+Data0                                        Data1
+                                FP16 Parameters                          FP16 Parameters
+
+
+               GPU0                                     GPU1
+
+
+
+  • forward pass to produce activations and loss (by fp16
+    parameters)
+
+
+                                                                                           23
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+               Activations                              Activations
+            Transformer stack                        Transformer stack
+Data0                                        Data1
+                                FP16 Parameters                          FP16 Parameters
+
+
+               GPU0                                     GPU1
+
+
+
+
+  • forward pass to produce activations and loss (by fp16
+    parameters)
+
+
+                                                                                           24
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+              Activations                              Activations
+           Transformer stack                        Transformer stack
+Data0                                       Data1
+                               FP16 Parameters                          FP16 Parameters
+
+
+              GPU0                                     GPU1
+
+
+
+ • forward pass to produce activations and loss (by fp16
+   parameters)
+
+
+                                                                                          25
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                                Loss                                     Loss
+               Activations                              Activations
+            Transformer stack                        Transformer stack
+Data0                                        Data1
+                                FP16 Parameters                          FP16 Parameters
+
+
+               GPU0                                     GPU1
+
+
+
+  • forward pass to produce activations and loss (by fp16
+    parameters)
+
+
+                                                                                           26
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                                Loss                                        Loss
+               Activations                                 Activations
+            Transformer stack                           Transformer stack
+Data0                                           Data1
+                                FP16 Gradient                               FP16 Gradient
+
+               GPU0                                        GPU1
+
+
+
+  • backward from loss to calculate fp16 local gradients
+
+
+
+                                                                                            27
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                                Loss                                        Loss
+               Activations                                 Activations
+            Transformer stack                           Transformer stack
+Data0                                           Data1
+                                FP16 Gradient                               FP16 Gradient
+
+               GPU0                                        GPU1
+
+
+
+  • backward from loss to calculate fp16 local gradients
+
+
+
+                                                                                            28
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                                Loss                                        Loss
+               Activations                                 Activations
+            Transformer stack                           Transformer stack
+Data0                                           Data1
+                                FP16 Gradient                               FP16 Gradient
+
+               GPU0                                        GPU1
+
+
+
+  • backward from loss to calculate fp16 local gradients
+
+
+
+                                                                                            29
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                                Loss                                        Loss
+               Activations                                 Activations
+            Transformer stack                           Transformer stack
+Data0                                           Data1
+                                FP16 Gradient                               FP16 Gradient
+
+               GPU0                                        GPU1
+
+
+
+  • backward from loss to calculate fp16 local gradients
+
+
+
+                                                                                            30
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                                Loss                                        Loss
+               Activations                                 Activations
+            Transformer stack                           Transformer stack
+Data0                                           Data1
+                                FP16 Gradient                               FP16 Gradient
+
+               GPU0                                        GPU1
+
+
+
+  • backward from loss to calculate fp16 local gradients
+
+
+
+                                                                                            31
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                                Loss                                        Loss
+               Activations                                 Activations
+            Transformer stack                           Transformer stack
+Data0                                           Data1
+                                FP16 Gradient                               FP16 Gradient
+
+               GPU0                                        GPU1
+
+
+
+  • backward from loss to calculate fp16 local gradients
+
+
+
+                                                                                            32
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                                Loss                                        Loss
+               Activations                                 Activations
+            Transformer stack                           Transformer stack
+Data0                                           Data1
+                                FP16 Gradient                               FP16 Gradient
+
+               GPU0                                        GPU1
+
+
+
+  • backward from loss to calculate fp16 local gradients
+
+
+
+                                                                                            33
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                               Loss                               Loss
+              Activations                        Activations
+           Transformer stack                  Transformer stack
+Data0                                 Data1
+
+              GPU0                               GPU1
+
+
+
+ • gradient gathering from another GPU and average gradient
+   calculation ➔ global gradient
+
+ • ncclReduceScatter
+                                                                         34
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                               Loss                                         Loss
+              Activations                                 Activations
+           Transformer stack                           Transformer stack
+Data0                                          Data1
+                               FP32 Gradient                               FP32 Gradient
+              GPU0                                        GPU1
+
+
+
+ • gradient gathering from another GPU and average gradient
+   calculation ➔ FP32 global gradient
+
+ • ncclReduceScatter
+                                                                                           35
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                               Loss                                         Loss
+              Activations                                 Activations
+           Transformer stack                           Transformer stack
+Data0                                          Data1
+
+              GPU0             FP32 Variance              GPU1             FP32 Variance
+
+
+
+
+  • fp32 variance update
+
+
+
+                                                                                           36
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                               Loss                                  Loss
+              Activations                           Activations
+           Transformer stack                     Transformer stack
+Data0                                    Data1
+
+              GPU0                                  GPU1
+                               FP32 Momentum                         FP32 Momentum
+
+
+
+
+  • fp32 momentum update
+
+
+
+
+                                                                                     37
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                               Loss                                    Loss
+              Activations                             Activations
+           Transformer stack                       Transformer stack
+Data0                                      Data1
+
+              GPU0                                    GPU1
+                               FP32 Parameters                         FP32 Parameters
+
+
+
+
+ • fp32 parameters update
+
+
+
+                                                                                         38
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                               Loss                                     Loss
+              Activations                              Activations
+           Transformer stack                        Transformer stack
+Data0                                       Data1
+                               FP16 Parameters                          FP16 Parameters
+
+
+              GPU0                                     GPU1
+                               FP32 Parameters                          FP32 Parameters
+
+
+
+
+ • copy fp32 parameters to fp16 parameters
+
+
+
+                                                                                          39
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                               Loss                                     Loss
+              Activations                              Activations
+           Transformer stack                        Transformer stack
+Data0                                       Data1
+                               FP16 Parameters                          FP16 Parameters
+
+
+              GPU0                                     GPU1
+                               FP32 Parameters                          FP32 Parameters
+
+
+
+
+  • fp16 parameters ready
+
+
+
+                                                                                          40
+ZeRO Stage 1: Partitioning Optimizer States
+   K GPUs (=2 in example)
+                                Loss                               Loss
+               Activations                        Activations
+            Transformer stack                  Transformer stack
+Data0                                  Data1
+
+               GPU0                               GPU1
+
+
+
+ • AllGather the fp16 weights to complete the iteration
+
+ • ncclAllGather
+
+                                                                          41
+    ZeRO Stage 2: Partition Gradients
+• Key idea:
+  o Each GPU compute all parameter gradients for its data partition
+  o but only stores one partition of gradients instead of all gradients.
+  o Passing the gradients out of its responsibility to the GPU
+    responsible for those gradients.
+
+• Memory for gradients reduced by K times. (K=# of GPUs)
+
+
+
+                                                                           42
+    ZeRO Stage 2: Partition Gradients
+K GPUs (=4 in example)
+
+
+
+
+• In backward pass, GPU 0,1,2 hold temporary buffers for the
+  gradients that GPU 3 is responsible for (M3)
+                                                               43
+    ZeRO Stage 2: Partition Gradients
+K GPUs (=4 in example)
+
+
+
+
+• GPU 0,1,2 pass the M3 gradients to GPU 3 (ncclReduce)
+
+
+                                                          44
+    ZeRO Stage 2: Partition Gradients
+K GPUs (=4 in example)
+
+
+
+
+Then GPU0, GPU1, GPU2 delete M3 gradients, GPU 3
+keeps M3 gradients.
+                                                   45
+    ZeRO Stage 2: Partition Gradients
+K GPUs (=4 in example)
+
+
+
+
+• Continue backward pass: GPU 0,1,3 hold temporary buffers
+  for the gradients that GPU 2 is responsible for (M2)
+                                                             46
+   ZeRO Stage 2: Partition Gradients
+K GPUs (=4 in example)
+
+
+
+
+• GPU 0,1,3 pass the M2 gradients to GPU2 (ncclReduce)
+
+                                                         47
+    ZeRO Stage 2: Partition Gradients
+K GPUs (=4 in example)
+
+
+
+
+• Then GPU0,1,3 delete M2 gradients, GPU 2 will keep M2
+  gradients.
+                                                          48
+    ZeRO Stage 2: Partition Gradients
+K GPUs (=4 in example)
+
+
+
+
+• Continue backward pass for M1 gradients
+
+                                            49
+    ZeRO Stage 2: Partition Gradients
+ K GPUs (=4 in example)
+
+
+
+
+• Continue backward pass for M0 gradients
+
+                                            50
+        ZeRO Stage 3: Partition Parameters
+   K GPUs (=4 in example)
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data0                          FP16 Params
+                                             Data1                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU0                                       GPU1
+
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data2                          FP16 Params
+                                             Data3                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU2                                       GPU3
+
+
+Partition parameters to K parts
+                                                                                        51
+        ZeRO Stage 3: Partition Parameters
+   K GPUs (=4 in example)
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data0                          FP16 Params
+                                             Data1                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU0                                       GPU1
+
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data2                          FP16 Params
+                                             Data3                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU2                                       GPU3
+
+
+Partition parameters to K parts
+During forward, GPU0 send first params to other GPUs(ncclBroadcast)                     52
+        ZeRO Stage 3: Partition Parameters
+   K GPUs (=4 in example)
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data0                          FP16 Params
+                                             Data1                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU0                                       GPU1
+
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data2                          FP16 Params
+                                             Data3                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU2                                       GPU3
+
+Partition parameters to K parts
+During forward, GPU0 send first params to other GPUs(ncclBroadcast)
+compute forward for first part layers                                                   53
+        ZeRO Stage 3: Partition Parameters
+   K GPUs (=4 in example)
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data0                          FP16 Params
+                                             Data1                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU0                                       GPU1
+
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data2                          FP16 Params
+                                             Data3                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU2                                       GPU3
+
+
+GPU1,2,3 delete first part parameters, GPU0 still keep first part params
+                                                                                        54
+        ZeRO Stage 3: Partition Parameters
+   K GPUs (=4 in example)
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data0                          FP16 Params
+                                             Data1                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU0                                       GPU1
+
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data2                          FP16 Params
+                                             Data3                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU2                                       GPU3
+
+Continue forward for next part, GPU1 send its params to other GPUs
+(ncclBroadcast), compute forward for second part layers
+                                                                                        55
+        ZeRO Stage 3: Partition Parameters
+   K GPUs (=4 in example)
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data0                          FP16 Params
+                                             Data1                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU0                                       GPU1
+
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data2                          FP16 Params
+                                             Data3                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU2                                       GPU3
+
+Continue forward for next part, GPU2 send its params to other GPUs
+(ncclBroadcast), compute forward for 3rd part layers
+                                                                                        56
+        ZeRO Stage 3: Partition Parameters
+   K GPUs (=4 in example)
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data0                          FP16 Params
+                                             Data1                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU0                                       GPU1
+
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data2                          FP16 Params
+                                             Data3                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU2                                       GPU3
+
+Continue forward for next part, GPU3 send its params to other GPUs
+(ncclBroadcast), compute forward for 4th part layers
+                                                                                        57
+        ZeRO Stage 3: Partition Parameters
+   K GPUs (=4 in example)
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data0                          FP16 Params
+                                             Data1                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU0                                       GPU1
+
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data2                          FP16 Params
+                                             Data3                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU2                                       GPU3
+
+During backward, compute backward for 4 th part layers
+Reduce grads to GPU3 (same as ZeRO stage 2)
+                                                                                        58
+        ZeRO Stage 3: Partition Parameters
+   K GPUs (=4 in example)
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data0                          FP16 Params
+                                             Data1                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU0                                       GPU1
+
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data2                          FP16 Params
+                                             Data3                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU2                                       GPU3
+
+GPU0,1,2 delete 4 th part parameters and gradients
+                                                                                        59
+        ZeRO Stage 3: Partition Parameters
+   K GPUs (=4 in example)
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data0                          FP16 Params
+                                             Data1                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU0                                       GPU1
+
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data2                          FP16 Params
+                                             Data3                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU2                                       GPU3
+
+Continue backward, GPU2 broadcast its parameters to GPU0, 1, 3
+All GPUs perform backward to calculate local gradients for part 3
+                                                                                        60
+        ZeRO Stage 3: Partition Parameters
+   K GPUs (=4 in example)
+                                Loss                                       Loss
+               Activations                                Activations
+           Transformer layers                         Transformer layers
+Data0                           FP16 Params
+                                              Data1                        FP16 Params
+                                FP16 Grads                                 FP16 Grads
+
+                GPU0                                       GPU1
+
+                                Loss                                       Loss
+               Activations                                Activations
+           Transformer layers                         Transformer layers
+Data2                           FP16 Params
+                                              Data3                        FP16 Params
+                                FP16 Grads                                 FP16 Grads
+
+                GPU2                                       GPU3
+
+GPU0, 1, 3 sends its gradients for part 3 to GPU2 (the same as ZeRO stage 2)
+                                                                                         61
+        ZeRO Stage 3: Partition Parameters
+   K GPUs (=4 in example)
+                                Loss                                       Loss
+               Activations                                Activations
+           Transformer layers                         Transformer layers
+Data0                           FP16 Params
+                                              Data1                        FP16 Params
+                                FP16 Grads                                 FP16 Grads
+
+                GPU0                                       GPU1
+
+                                Loss                                       Loss
+               Activations                                Activations
+           Transformer layers                         Transformer layers
+Data2                           FP16 Params
+                                              Data3                        FP16 Params
+                                FP16 Grads                                 FP16 Grads
+
+                GPU2                                       GPU3
+
+GPU0, 1, 3 deletes its parameters and gradients for part 3
+                                                                                         62
+        ZeRO Stage 3: Partition Parameters
+   K GPUs (=4 in example)
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data0                          FP16 Params
+                                             Data1                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU0                                       GPU1
+
+                               Loss                                       Loss
+              Activations                                Activations
+          Transformer layers                         Transformer layers
+Data2                          FP16 Params
+                                             Data3                        FP16 Params
+                               FP16 Grads                                 FP16 Grads
+
+               GPU2                                       GPU3
+
+Continue backward for part 2, part 1
+                                                                                        63
+Memory Consumption for ZeRO in DDP
+• LLM with N parameters, Optimizer needs M bytes for each
+  parameter (e.g. M=8, 12 or 16)
+
+• Original memory: 4N + M*N
+
+• ZeRO-1: 4N + M*N / K
+
+• ZeRO-2: 2N + (2+M) * N / K
+
+• ZeRO-3: (4+M)*N / K
+
+• But, at the cost of additional parameter transfer         64
+          ZeRO Communication Cost
+
+• Zero stage 1 and 2 (optimizer state and gradient) doesn’t
+  introduce additional communication, while enabling up to 8x
+  memory reduction
+
+• Zero stage 3 (parameter) communication
+  o 2x broadcast during forward/backward, plus Reduce in Zero2.
+    Total 3x communication overhead.
+  o Baseline needs ScatterReduce + AllGather
+
+
+                                                                  65
+                             Outline
+• Memory Consumption for LLM training
+
+• Partitioning and reducing the memory for data parallel
+  training
+  o Partition optimizer states
+  o Partition gradients
+  o Partition parameters
+
+• Other memory optimization
+
+                                                           66
+ZeRO: Reduce Memory for Activations
+
+• Partitioned Activation Checkpointing
+  o Tensor Parallelism by design requires a replication of the
+    activations
+  o Split every activation to different devices. Gather them when
+    needed.
+
+
+
+
+                                                                    67
+                      ZeRO: Buffers
+
+• Constant Size Buffers (similar to Bucketing in pytorch ddp)
+  o Buffer is used in doing all-reduce to improve bandwidth.
+  o Modern implementations fuses all the parameters into a single
+    buffer.
+  o ZeRO uses constant size buffers to be more efficient for a large
+    model.
+
+
+
+
+                                                                       68
+     ZeRO: Memory Defragmentation
+
+• Memory Defragmentation
+  o Long-lived memory (Model parameters, Optimizer state): Store
+    together
+  o Short-lived memory (Discarded activations)
+
+• We can further improve by memory reuse as in LightSeq.
+
+
+
+
+                                                                   69
+ Reduce Communication in ZeRO DDP
+• Applying block-wise quantization technique to parameters
+  during forward (broadcast params). FP16 ➔ INT 8.
+  o zeropoint quantization
+
+• Apply quantization during backward ReduceScatter,
+  FP16➔ INT8 or INT4
+
+• better partition parameters: maintain a full set of parameters
+  on each node
+
+ Wang et al. ZeRO++: Extremely Efficient Collective Communication for Giant Model Training. ICLR 2024.   70
+                Memory Benchmarking of ZeRO
+      • Theoretical: On a 32GB V100 clusters (Up to 1024 V100),
+
+      • Enable the training of a model with 1 Trillion (1000B)
+        parameters using 1024 V100.
+
+      • There is no limit to the number of GPUs. (So probably more)
+
+
+
+
+Per-device memory consumption of different optimizations
+                                                                      71
+      Training Performance of ZeRO
+
+• Train a 17B model (Turing-NLG. The largest as of 2020.1)
+  and has SOTA perplexity in Webtext-103.
+
+• Train a 100B model on 400 GPUs, achieving high
+  throughput over baseline (~10x, 30% of the theoretical
+  peak).
+
+
+
+
+                                                             72
+Combining ZeRO with Pipeline Parallelism
+ and Tensor Parallelism (3D Parallelism)
+
+
+
+
+                                           73
+Combining ZeRO with Pipeline Parallelism
+ and Tensor Parallelism (3D Parallelism)
+
+
+
+
+                                           74
+                               Summary
+• ZeRO : reducing memory footprint in distributed training
+   o ➔ enables training significantly larger models
+
+• Key idea: partition optimizer states, gradients, and parameters.
+
+• Pros:
+   o Lower memory usages significantly.
+   o Scalable, flexible, easy-to-use.
+
+• Cons:
+   o Some stages introduce extra communication overhead, depending on
+     infrastructure (PCI-E / NVLink)
+                                                                        75
+                  Code Example
+• https://github.com/llmsystem/llmsys_code_examples/blob/m
+  ain/deepspeed_example/DeepSpeed-Example.ipynb
+
+
+
+
+                                                             76
+

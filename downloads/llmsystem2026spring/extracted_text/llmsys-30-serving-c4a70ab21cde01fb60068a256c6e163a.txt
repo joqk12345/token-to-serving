@@ -1,0 +1,448 @@
+11868 LLM Systems
+ LLM Serving
+      Lei Li
+
+
+
+                    1
+                   Today’s Topic
+1. Architectures for LLM Applications
+
+2. Frameworks for LLM Serving
+
+
+
+
+                                        2
+                LLM App Stack
+
+
+
+
+                                                                3
+https://a16z.com/emerging-architectures-for-llm-applications/
+LLM App Stack
+
+            1.   Data Preprocessing / Embedding
+            2.   Prompt Construction / Retrieval
+            3.   Prompt Execution / Inference
+
+
+
+
+                                              4
+1. Data Preprocessing / Embedding
+
+
+
+
+                                    5
+   1. Data Preprocessing / Embedding
+• Data Pipelines
+  o Include loaders, parsers, and preprocessing.
+  o E.g. Databricks, Airflow, and Unstructured.
+
+
+
+
+                                                   6
+  1. Data Preprocessing / Embedding
+• Embedding Model
+  o Different models have their own advantages.
+
+  o OpenAI: Effective but cheap
+
+  o Cohere: Focus more on embeddings
+
+  o Hugging Face: Open-source
+
+  o Customer Embedding: e.g. BERT
+                                                  7
+  1. Data Preprocessing / Embedding
+• Vector Database
+  o Offer optimized storage and query capabilities for the unique
+    structure of vector embeddings.
+
+
+
+
+                                                                    8
+  1. Data Preprocessing / Embedding
+• Vector Database
+  o Pinecone: Fully clound-hosted
+
+  o chroma: Local vector management
+
+  o Faiss: by meta
+
+  o Weaviate: Open-source
+
+
+                                      9
+2. Prompt Construction / Retrieval
+
+
+
+
+                                     10
+    2. Prompt Construction / Retrieval
+• Orchestration (Prompt
+  Optimization/Engineering)
+  o Abstract away many of the details of prompt
+    chaining
+  o Interface with external APIs
+  o Retrieve contextual data from vector
+    databases
+  o Maintain memory across multiple LLM calls
+  o Output a prompt, or a series of prompts, to
+    submit to an LLM
+
+
+                                                  11
+    2. Prompt Construction / Retrieval
+• Orchestration
+  o LlamaIndex: Specially designed for building search and retrieval applications
+  o LangChain: A general-purpose framework for a wide variety of applications
+
+
+
+
+                                                                                    12
+3. Prompt Execution / Inference
+
+
+
+
+                                  13
+      3. Prompt Execution / Inference
+• LLM APIs
+  o Proprietary APIs: E.g. OpenAI and Anthropic.
+  o Open APIs: E.g. Hugging Face and Replicate.
+
+  o ChatGPT: May have unreliable latency for production.
+
+
+
+
+                                                           14
+      3. Prompt Execution / Inference
+• LLM Hosting
+  o General Could : E.g. AWS, GCP, and Azure.
+  o Opinionated Cloud: E.g. Databricks, Anyscale, and Mosaic.
+
+• LLM Cache
+  o E.g. Redis, SQLite, and GPTCache.
+
+• Validation
+  o E.g. Guardrails, Rebuff, and Guidance.
+
+                                                                15
+      3. Prompt Execution / Inference
+• Logging
+  o E.g. Weights&Biases, MLflow, and PromptLayer.
+
+
+
+
+                                                    16
+      3. Prompt Execution / Inference
+• App Hosting
+  o Vercel: Provide a cloud-native solution
+
+  o Steamship: end-to-end hosting
+
+  o Anyscale and Modal: Host models and Python code in one place
+
+
+
+
+                                                                   17
+ Build App Autonomously with AI Agent
+• Can we use AI to perform any
+  task?
+
+• AutoGPT
+  o Let an LLM-based AI agent
+    decide what to do, while feeding
+    its results back into the prompt.
+  o This allows the program to
+    iteratively and incrementally work
+    towards its objective.
+                                         18
+                   Today’s Topic
+1. Architectures for LLM Applications
+
+2. Frameworks for LLM Serving
+
+
+
+
+                                        19
+         Frameworks for LLM Serving
+• In this lecture:
+  o NVIDIA Triton + LightSeq/TensorRT-LLM
+  o Text Generation Inference
+  o OpenLLM
+  o MLC LLM
+  o LightLLM
+
+• In the later lectures:
+  o vLLM / DeepSpeed
+
+                                            20
+                          Triton“s”
+• Triton (Inference Server) from NVIDIA
+  o An open-source inference serving software that streamlines AI
+    inferencing.
+
+• Triton from OpenAI
+  o A language and compiler for writing highly efficient custom Deep-
+    Learning primitives.
+
+
+
+
+                                                                        21
+                      NVIDIA Triton
+• It supports for various deep learning frameworks.
+  o E.g. TensorFlow and PyTorch.
+
+• It optimizes inference for multiple query types.
+  o E.g. real-time, batch, and streaming.
+
+• It can be deployed on different environments
+  o E.g. public cloud and embedded devices.
+
+
+
+                                                      22
+NVIDIA Triton – Dynamic Batching
+
+
+
+
+                                   23
+NVIDIA Triton + LightSeq / TensorRT-LLM
+
+• For LLM serving, Triton has to use
+  with an inference engine, e.g.,          Triton Inference Server
+  LightSeq or TensorRT-LLM.
+
+• Triton groups multiple client requests
+  into a batch.
+
+• TensorRT-LLM conducts the
+  inference procedure in the batched
+  manner.
+                                                      LightSeq/TensorRT-LLM
+
+                                                                          24
+NVIDIA Triton + FasterTransformer – Code
+Run web server
+using docker:
+
+
+
+
+                                       25
+NVIDIA Triton + FasterTransformer – Code
+
+        Make queries:
+
+
+
+
+                                       26
+            Text Generation Inference
+• It has optimized transformers code for inference using Flash
+  Attention and Paged Attention.
+  o Native support for models from HuggingFace.
+
+• It is production ready and can monitor the server load and get
+  insights into its performance.
+  o Distributed tracing with Open Telemetry, Prometheus metrics.
+
+• It offers a wide range of options to manage model inference.
+  o E.g. precision adjustment and quantization.
+
+
+                                                                   27
+Text Generation Inference – Framework
+
+
+
+
+                         tensor-parallel   28
+Text Generation Inference – Code
+  Run web server using docker:
+
+
+
+
+  Make queries:
+
+
+
+
+                                   29
+                       OpenLLM
+• It allows users to easily create AI applications by
+  composing LLMs with other models and services.
+  o E.g. LangChain, LlamaIndex, and Hugging Face.
+
+• It allows users to bring their own LLM and fine-tune them.
+
+• It is an open-source platform and constantly developing.
+
+
+
+
+                                                               30
+         OpenLLM – Code
+Run web server:
+
+
+
+
+Make queries:
+
+
+
+
+                          31
+                         MLC LLM
+• It enables the users to develop, optimize and deploy AI
+  models natively on consumer devices.
+
+• It can compile the model for different platforms.
+  o E.g. C++ for the command line, JavaScript for the web, Swift for
+    iOS, and Java/Kotlin for Android.
+
+
+
+
+                                                                       32
+MLC LLM – Framework
+
+
+
+
+                      33
+MLC LLM – Advantage of Local LLM
+
+
+
+
+                                   34
+                  MLC LLM – Code
+Run web server:
+
+                         Make queries:
+
+
+
+
+                                         35
+                       LightLLM
+• It performs tokenization, model inference, and
+  detokenization asynchronously, to improve GPU utilization.
+
+• It implements Token Attention, a token-wise's KV cache
+  memory management algorithm.
+
+• It adopts Efficient Router scheduling implementation, which
+  collaborates with Token Attention to manage the GPU
+  memory of each token.
+
+                                                                36
+LightLLM – Framework
+
+
+
+
+                       37
+LightLLM – Token Attention
+
+
+
+
+                             38
+LightLLM – Token Attention
+
+
+
+
+                             39
+LightLLM – Token Attention
+
+
+
+
+                             40
+LightLLM – Token Attention
+
+
+
+
+                             41
+LightLLM – Token Attention
+
+
+
+
+                             42
+LightLLM – Efficient Router
+
+
+
+
+                              43
+LightLLM – Efficient Router
+
+
+
+
+                              44
+LightLLM – Efficient Router
+
+
+
+
+                              45
+LightLLM – Efficient Router
+
+
+
+
+                              46
+LightLLM – Performance
+
+
+
+
+                         47
+                         LightLLM – Code
+                                Make queries:
+Run web server using docker:
+
+
+
+
+                                                48
+                             References
+• https://a16z.com/emerging-architectures-for-llm-applications/
+• https://superwise.ai/blog/considerations-best-practices-for-llm-architectures/
+• https://huyenchip.com/2023/04/11/llm-engineering.html
+• https://betterprogramming.pub/frameworks-for-serving-llms-60b7f7b23407
+• https://developer.nvidia.com/blog/fast-and-scalable-ai-model-deployment-
+  with-nvidia-triton-inference-server/
+• https://huggingface.co/docs/text-generation-inference/en/index
+• https://docs.databricks.com/en/workflows/index.html
+• https://www.kdnuggets.com/2023/06/vector-databases-important-llms.html
+• https://spotintelligence.com/2023/11/17/llm-orchestration-frameworks/
+• Yu, G. I., Jeong, J. S., Kim, G. W., Kim, S., & Chun, B. G. (2022). Orca: A
+  distributed serving system for {Transformer-Based} generative models. In 16th
+  USENIX Symposium on Operating Systems Design and Implementation (OSDI
+  22) (pp. 521-538).
+                                                                                   49
+

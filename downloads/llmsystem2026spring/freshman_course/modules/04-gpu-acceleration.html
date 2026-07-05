@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPU 加速方法 | LLM 系统新生导学</title>
+  <style>
+  :root { --ink:#172033; --muted:#607089; --line:#d8e0ec; --bg:#f6f8fb; --panel:#fff; --blue:#2563eb; --green:#15803d; --amber:#b45309; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif; background: var(--bg); color: var(--ink); letter-spacing: 0; }
+  main { max-width: 920px; margin: 0 auto; padding: 28px 18px 48px; }
+  header, section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 22px; margin-bottom: 14px; box-shadow: 0 10px 28px rgba(23,32,51,.07); }
+  a { color: var(--blue); text-decoration: none; } a:hover { text-decoration: underline; }
+  .back { display: inline-flex; margin-bottom: 12px; font-weight: 700; }
+  h1 { margin: 0 0 8px; font-size: clamp(28px, 4vw, 42px); line-height: 1.08; }
+  h2 { margin: 0 0 12px; font-size: 21px; }
+  p, li { line-height: 1.8; font-size: 16px; }
+  .meta { color: var(--muted); margin: 0; }
+  .tag { display:inline-flex; border-radius:999px; padding:4px 10px; background:#eaf1ff; color:#1d4ed8; font-weight:700; font-size:13px; margin-right:8px; }
+  .grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:14px; }
+  .callout { border-left: 4px solid var(--green); background:#e9f7ef; padding:12px 14px; border-radius:8px; }
+  .questions li::marker { color: var(--amber); font-weight: 800; }
+  @media (max-width: 760px) { .grid { grid-template-columns:1fr; } header, section { padding:18px; } }
+</style>
+</head>
+<body>
+  <main>
+    <a class="back" href="../index.html">返回互动课堂</a>
+    <header>
+      <span class="tag">GPU 与并行计算</span>
+      <h1>GPU 加速方法</h1>
+      <p class="meta">这是一篇面向大学新生的导学文档，根据课程课件重新组织。原始 PDF 仍保留在文末，供深入阅读。</p>
+    </header>
+    <section>
+      <h2>学习目标</h2>
+      <ul><li>理解加速不是只增加硬件</li><li>认识算子、kernel 和性能瓶颈</li><li>能从计算和访存两方面分析问题</li></ul>
+    </section>
+    <section>
+      <h2>核心解释</h2>
+      <p>GPU 加速通常先定位最耗时的算子，再考虑并行划分、数据布局、内存复用和同步开销。</p><p>深度学习框架会调用底层高性能库，但理解基础原理有助于判断什么时候库函数不够好。</p><p>性能优化要基于测量。没有 profiling，就很容易优化错地方。</p>
+    </section>
+    <section>
+      <h2>课堂例子</h2>
+      <p class="callout">如果食堂排队慢，可能是窗口少，也可能是取餐路线绕、付款慢或备餐慢。系统优化也要先找真正瓶颈。</p>
+    </section>
+    <section>
+      <h2>检查问题</h2>
+      <ol class="questions"><li>什么是算子？</li><li>为什么优化前要先测量？</li></ol>
+    </section>
+    <section>
+      <h2>原始资料</h2>
+      <p><a href="../../source_pdfs/llmsys-04-gpu-acceleration-48ffa5768ba62c54138f0a71ca2b68b8.pdf" target="_blank" rel="noopener">打开原始课件 PDF</a></p>
+    </section>
+  </main>
+</body>
+</html>

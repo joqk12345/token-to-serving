@@ -1,0 +1,1209 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Qwen3.5-122B-A10B FP8 Kernel 分层可视化</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #66758d;
+      --line: #d8e0ec;
+      --fp8: #ef4444;
+      --fp16: #111827;
+      --green: #dff3df;
+      --green-line: #8bc68c;
+      --purple: #eadcf6;
+      --purple-line: #c4a3dc;
+      --act: #ffffff;
+      --blue: #2563eb;
+      --amber: #b45309;
+      --shadow: 0 16px 42px rgba(23, 32, 51, .09);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+
+    main {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    header {
+      background: #172033;
+      color: white;
+      border-radius: 8px;
+      padding: 22px 24px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1.08;
+    }
+
+    header p {
+      margin: 0;
+      color: #cbd5e1;
+      line-height: 1.7;
+      max-width: 1100px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(720px, 1.25fr) minmax(360px, .75fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+
+    .card h2 {
+      margin: 0 0 12px;
+      font-size: 20px;
+    }
+
+    .diagram-wrap {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background:
+        linear-gradient(90deg, rgba(37,99,235,.05) 1px, transparent 1px),
+        linear-gradient(rgba(37,99,235,.05) 1px, transparent 1px),
+        #fbfcff;
+      background-size: 24px 24px;
+    }
+
+    svg {
+      display: block;
+      min-width: 920px;
+      width: 100%;
+      height: auto;
+    }
+
+    .box {
+      fill: var(--act);
+      stroke: #6b7280;
+      stroke-width: 1.4;
+    }
+
+    .linear {
+      fill: var(--green);
+      stroke: var(--green-line);
+    }
+
+    .nonlinear {
+      fill: var(--purple);
+      stroke: var(--purple-line);
+    }
+
+    .moe {
+      fill: #fff7ed;
+      stroke: #f59e0b;
+    }
+
+    .block-outline {
+      fill: rgba(255,255,255,.38);
+      stroke: var(--fp8);
+      stroke-width: 2;
+      stroke-dasharray: 7 6;
+    }
+
+    .stage-label {
+      font-size: 21px;
+      font-weight: 800;
+      fill: #374151;
+    }
+
+    .label {
+      font-size: 13px;
+      fill: #111827;
+      font-weight: 700;
+    }
+
+    .small {
+      font-size: 12px;
+      fill: #374151;
+    }
+
+    .dtype-fp8 {
+      font-size: 12px;
+      fill: var(--fp8);
+      font-weight: 900;
+    }
+
+    .dtype-fp16 {
+      font-size: 12px;
+      fill: var(--fp16);
+      font-weight: 900;
+    }
+
+    .arrow {
+      stroke: #111827;
+      stroke-width: 1.4;
+      fill: none;
+      marker-end: url(#arrow);
+    }
+
+    .residual {
+      stroke: #111827;
+      stroke-width: 1.4;
+      fill: none;
+    }
+
+    .hot {
+      fill: #fee2e2;
+      stroke: #ef4444;
+      stroke-width: 2;
+    }
+
+    .quant {
+      fill: #fef3c7;
+      stroke: #d97706;
+      stroke-width: 1.5;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .legend-item {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      color: #34435c;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .swatch {
+      width: 24px;
+      height: 16px;
+      border-radius: 4px;
+      border: 1px solid var(--line);
+      flex: 0 0 auto;
+    }
+
+    .rank-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .rank-item {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: start;
+      padding: 11px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcff;
+    }
+
+    .rank-num {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      background: #172033;
+      color: white;
+      border-radius: 8px;
+      font-weight: 800;
+      font-size: 13px;
+    }
+
+    .rank-item b {
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    .rank-item span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .badge {
+      display: inline-flex;
+      min-height: 24px;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 12px;
+      font-weight: 800;
+      color: #991b1b;
+      background: #fee2e2;
+      white-space: nowrap;
+    }
+
+    .badge.blue {
+      color: #1d4ed8;
+      background: #eaf1ff;
+    }
+
+    .badge.green {
+      color: #166534;
+      background: #dcfce7;
+    }
+
+    .profile-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8px 0 14px;
+      font-size: 13px;
+    }
+
+    .profile-table th,
+    .profile-table td {
+      border-bottom: 1px solid var(--line);
+      padding: 8px 6px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .profile-table th {
+      color: #34435c;
+      background: #f8fbff;
+      font-weight: 800;
+    }
+
+    .profile-table td:nth-child(3),
+    .profile-table td:nth-child(4),
+    .profile-table td:nth-child(5) {
+      text-align: right;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .delta-up { color: #b91c1c; font-weight: 800; }
+    .delta-down { color: #15803d; font-weight: 800; }
+    .delta-flat { color: #66758d; font-weight: 800; }
+
+    .notes {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcff;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 24px;
+      margin-bottom: 4px;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .explain-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .explain-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+
+    .explain-card h2 {
+      margin: 0 0 10px;
+      font-size: 19px;
+    }
+
+    .explain-card p {
+      margin: 0 0 10px;
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 14px;
+    }
+
+    .mini-diagram {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcff;
+      overflow: auto;
+    }
+
+    .mini-diagram svg {
+      min-width: 0;
+      width: 100%;
+      height: auto;
+    }
+
+    .mini-node {
+      fill: #ffffff;
+      stroke: #94a3b8;
+      stroke-width: 1.4;
+    }
+
+    .mini-hot {
+      fill: #fee2e2;
+      stroke: #ef4444;
+      stroke-width: 1.8;
+    }
+
+    .mini-blue {
+      fill: #eaf1ff;
+      stroke: #60a5fa;
+      stroke-width: 1.8;
+    }
+
+    .mini-green {
+      fill: #dcfce7;
+      stroke: #22c55e;
+      stroke-width: 1.8;
+    }
+
+    .mini-amber {
+      fill: #fff7ed;
+      stroke: #f59e0b;
+      stroke-width: 1.8;
+    }
+
+    .explain-card.wide {
+      grid-column: 1 / -1;
+    }
+
+    .flow-path {
+      stroke: #64748b;
+      stroke-width: 2;
+      fill: none;
+      stroke-dasharray: 7 6;
+    }
+
+    .flow-path.hot {
+      stroke: #ef4444;
+    }
+
+    .flow-path.comm {
+      stroke: #2563eb;
+    }
+
+    .flow-path.moe-flow {
+      stroke: #f59e0b;
+    }
+
+    .motion-dot {
+      filter: drop-shadow(0 2px 4px rgba(15, 23, 42, .22));
+    }
+
+    .gpu-card {
+      fill: #ffffff;
+      stroke: #94a3b8;
+      stroke-width: 1.4;
+    }
+
+    .expert-chip {
+      fill: #fff7ed;
+      stroke: #f59e0b;
+      stroke-width: 1.2;
+    }
+
+    .shard-chip {
+      fill: #eaf1ff;
+      stroke: #60a5fa;
+      stroke-width: 1.2;
+    }
+
+    .sync-chip {
+      fill: #dcfce7;
+      stroke: #22c55e;
+      stroke-width: 1.5;
+    }
+
+    @media (max-width: 1100px) {
+      .layout { grid-template-columns: 1fr; }
+      .explain-grid { grid-template-columns: 1fr; }
+      .legend { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 760px) {
+      main { padding: 14px; }
+      .split { grid-template-columns: 1fr; }
+      .legend { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Qwen3.5-122B-A10B FP8 Kernel 分层可视化</h1>
+      <p>
+        参考 FP8 量化优化报告中的 Transformer Block 数据类型分层图重绘：
+        红色 FP8 标注表示建议进入 FP8 计算或 FP8 KV cache 路径，黑色 FP16 表示保持 FP16/BF16 的激活、归一化、位置编码、残差或调度逻辑。
+        Qwen3.5-122B-A10B 按 MoE + Hybrid Attention 模型理解：总参数约 122B，每 token 激活约 10B，attention 层可能混合 full / sliding window / sparse-global 等模式。
+      </p>
+    </header>
+
+    <div class="layout">
+      <section class="card">
+        <h2>模型分层与数据类型路径</h2>
+        <div class="diagram-wrap">
+          <svg viewBox="0 0 960 1340" role="img" aria-label="Qwen3.5-122B-A10B Transformer Block FP8 kernel 分层图">
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#111827"></path>
+              </marker>
+            </defs>
+
+            <rect x="20" y="20" width="920" height="1300" rx="10" fill="rgba(255,255,255,.72)" stroke="#d8e0ec"></rect>
+            <text x="480" y="58" text-anchor="middle" class="stage-label">Transformer Block: Qwen3.5-122B-A10B</text>
+
+            <rect x="395" y="86" width="170" height="26" rx="5" class="box"></rect>
+            <text x="480" y="104" text-anchor="middle" class="label">hidden state X</text>
+            <text x="352" y="104" class="dtype-fp16">FP16/BF16</text>
+
+            <rect x="170" y="146" width="620" height="415" rx="48" class="block-outline"></rect>
+            <text x="600" y="166" class="stage-label">Hybrid Attention Block</text>
+
+            <path d="M480 112 L480 142" class="arrow"></path>
+            <rect x="420" y="142" width="120" height="30" rx="5" class="linear"></rect>
+            <text x="480" y="162" text-anchor="middle" class="label">RMSNorm</text>
+            <text x="350" y="162" class="dtype-fp16">FP16</text>
+
+            <path d="M480 172 L480 205" class="arrow"></path>
+            <rect x="422" y="205" width="116" height="26" rx="5" class="box"></rect>
+            <text x="480" y="223" text-anchor="middle" class="small">activation</text>
+            <text x="350" y="223" class="dtype-fp16">FP16</text>
+
+            <path d="M480 231 L480 268" class="arrow"></path>
+            <rect x="175" y="248" width="122" height="48" rx="6" class="quant"></rect>
+            <text x="236" y="268" text-anchor="middle" class="small">R7 Q/DQ</text>
+            <text x="236" y="286" text-anchor="middle" class="small">scale / layout</text>
+            <path d="M297 272 L315 280" class="arrow" stroke-dasharray="5 4"></path>
+            <rect x="315" y="268" width="330" height="34" rx="5" class="linear hot"></rect>
+            <text x="480" y="290" text-anchor="middle" class="label">Fused QKV Projection GEMM</text>
+            <text x="655" y="290" class="dtype-fp16">R3</text>
+            <text x="270" y="290" class="dtype-fp8">FP8</text>
+
+            <path d="M480 302 L480 340" class="arrow"></path>
+            <rect x="270" y="340" width="420" height="56" rx="7" class="box"></rect>
+            <rect x="295" y="352" width="95" height="28" rx="5" class="box"></rect>
+            <rect x="430" y="352" width="95" height="28" rx="5" class="box"></rect>
+            <rect x="565" y="352" width="95" height="28" rx="5" class="box"></rect>
+            <text x="342" y="370" text-anchor="middle" class="small">Query</text>
+            <text x="477" y="370" text-anchor="middle" class="small">Key</text>
+            <text x="612" y="370" text-anchor="middle" class="small">Value</text>
+            <text x="222" y="374" class="dtype-fp16">FP16</text>
+
+            <path d="M342 380 L342 426" class="arrow"></path>
+            <path d="M477 380 L477 426" class="arrow"></path>
+            <path d="M612 380 L612 478" class="arrow"></path>
+            <rect x="295" y="426" width="95" height="28" rx="5" class="nonlinear"></rect>
+            <rect x="430" y="426" width="95" height="28" rx="5" class="nonlinear"></rect>
+            <text x="342" y="444" text-anchor="middle" class="small">RoPE</text>
+            <text x="477" y="444" text-anchor="middle" class="small">RoPE</text>
+            <text x="222" y="444" class="dtype-fp16">FP16</text>
+
+            <path d="M342 454 L342 488" class="arrow"></path>
+            <rect x="292" y="488" width="100" height="30" rx="5" class="nonlinear"></rect>
+            <text x="342" y="508" text-anchor="middle" class="small">LogN Scaling</text>
+            <text x="222" y="508" class="dtype-fp16">FP16</text>
+
+            <path d="M342 518 L342 548" class="arrow"></path>
+            <path d="M477 454 L477 548" class="arrow"></path>
+            <path d="M612 478 L612 548" class="arrow"></path>
+            <rect x="300" y="536" width="360" height="34" rx="5" class="nonlinear hot"></rect>
+            <text x="480" y="558" text-anchor="middle" class="label">Hybrid Attention Router</text>
+            <text x="670" y="558" class="dtype-fp16">R6</text>
+            <text x="252" y="558" class="dtype-fp16">FP16</text>
+
+            <path d="M480 570 L360 608" class="arrow"></path>
+            <path d="M480 570 L480 608" class="arrow"></path>
+            <path d="M480 570 L600 608" class="arrow"></path>
+            <rect x="260" y="608" width="180" height="42" rx="7" class="nonlinear hot"></rect>
+            <rect x="450" y="608" width="160" height="42" rx="7" class="nonlinear hot"></rect>
+            <rect x="620" y="608" width="170" height="42" rx="7" class="nonlinear"></rect>
+            <text x="350" y="627" text-anchor="middle" class="label">Full Attention</text>
+            <text x="350" y="643" text-anchor="middle" class="small">global / long-context layers</text>
+            <text x="530" y="627" text-anchor="middle" class="label">Sliding Window</text>
+            <text x="530" y="643" text-anchor="middle" class="small">local KV window</text>
+            <text x="705" y="627" text-anchor="middle" class="label">Sparse / Global</text>
+            <text x="705" y="643" text-anchor="middle" class="small">selected global tokens</text>
+            <text x="305" y="666" class="dtype-fp16">R4 FlashAttention</text>
+            <text x="210" y="634" class="dtype-fp8">FP8 KV</text>
+            <text x="800" y="634" class="dtype-fp8">FP8</text>
+
+            <path d="M350 650 L480 690" class="arrow"></path>
+            <path d="M530 650 L480 690" class="arrow"></path>
+            <path d="M705 650 L480 690" class="arrow"></path>
+            <rect x="423" y="690" width="114" height="26" rx="5" class="box"></rect>
+            <text x="480" y="708" text-anchor="middle" class="small">activation</text>
+            <text x="350" y="708" class="dtype-fp16">FP16</text>
+
+            <path d="M480 716 L480 750" class="arrow"></path>
+            <rect x="210" y="735" width="122" height="48" rx="6" class="quant"></rect>
+            <text x="271" y="755" text-anchor="middle" class="small">R7 Q/DQ</text>
+            <text x="271" y="773" text-anchor="middle" class="small">scale / cast</text>
+            <path d="M332 759 L350 765" class="arrow" stroke-dasharray="5 4"></path>
+            <rect x="350" y="750" width="260" height="34" rx="5" class="linear hot"></rect>
+            <text x="480" y="772" text-anchor="middle" class="label">O Projection GEMM</text>
+            <text x="620" y="772" class="dtype-fp16">R3</text>
+            <text x="300" y="772" class="dtype-fp8">FP8</text>
+
+            <path d="M480 784 L480 820" class="arrow"></path>
+            <rect x="422" y="820" width="116" height="26" rx="5" class="box"></rect>
+            <text x="480" y="838" text-anchor="middle" class="small">activation</text>
+            <text x="350" y="838" class="dtype-fp16">FP16</text>
+
+            <path d="M480 846 L480 883" class="arrow"></path>
+            <circle cx="480" cy="883" r="25" class="nonlinear"></circle>
+            <text x="480" y="892" text-anchor="middle" font-size="30" fill="#111827">+</text>
+            <text x="545" y="891" class="dtype-fp16">FP16</text>
+
+            <path d="M395 99 L215 99 L215 883 L455 883" class="residual"></path>
+            <text x="204" y="460" class="small" transform="rotate(-90 204 460)">residual</text>
+
+            <path d="M480 908 L480 925" class="arrow"></path>
+            <rect x="422" y="925" width="116" height="26" rx="5" class="box"></rect>
+            <text x="480" y="943" text-anchor="middle" class="small">activation h</text>
+            <text x="350" y="943" class="dtype-fp16">FP16</text>
+
+            <rect x="170" y="970" width="620" height="282" rx="48" class="block-outline"></rect>
+            <text x="575" y="991" class="stage-label">MoE Feed Forward Layer</text>
+
+            <path d="M480 951 L480 1010" class="arrow"></path>
+            <rect x="420" y="1010" width="120" height="30" rx="5" class="linear"></rect>
+            <text x="480" y="1030" text-anchor="middle" class="label">RMSNorm</text>
+            <text x="550" y="1030" class="dtype-fp16">R5</text>
+            <text x="350" y="1030" class="dtype-fp16">FP16</text>
+
+            <path d="M480 1040 L480 1073" class="arrow"></path>
+            <rect x="420" y="1073" width="120" height="28" rx="5" class="box"></rect>
+            <text x="480" y="1092" text-anchor="middle" class="small">activation</text>
+            <text x="350" y="1092" class="dtype-fp16">FP16</text>
+
+            <path d="M480 1101 L352 1132" class="arrow"></path>
+            <path d="M480 1101 L480 1132" class="arrow"></path>
+            <path d="M480 1101 L610 1132" class="arrow"></path>
+            <rect x="122" y="1114" width="122" height="52" rx="6" class="quant"></rect>
+            <text x="183" y="1135" text-anchor="middle" class="small">R7 Q/DQ</text>
+            <text x="183" y="1153" text-anchor="middle" class="small">expert scale</text>
+            <path d="M244 1140 L260 1148" class="arrow" stroke-dasharray="5 4"></path>
+            <rect x="260" y="1132" width="184" height="36" rx="6" class="moe hot"></rect>
+            <rect x="468" y="1132" width="130" height="36" rx="6" class="moe"></rect>
+            <rect x="622" y="1132" width="130" height="36" rx="6" class="moe hot"></rect>
+            <text x="352" y="1155" text-anchor="middle" class="label">Top-k Expert up GEMM</text>
+            <text x="533" y="1155" text-anchor="middle" class="label">Router / Gate</text>
+            <text x="687" y="1155" text-anchor="middle" class="label">Expert gate GEMM</text>
+            <text x="765" y="1155" class="dtype-fp16">R1</text>
+            <text x="214" y="1155" class="dtype-fp8">FP8</text>
+
+            <path d="M352 1168 L352 1198" class="arrow"></path>
+            <path d="M687 1168 L687 1198" class="arrow"></path>
+            <rect x="302" y="1198" width="100" height="30" rx="5" class="box"></rect>
+            <rect x="637" y="1198" width="100" height="30" rx="5" class="nonlinear"></rect>
+            <text x="352" y="1218" text-anchor="middle" class="small">activation</text>
+            <text x="687" y="1218" text-anchor="middle" class="small">SiLU</text>
+            <text x="252" y="1218" class="dtype-fp16">FP16</text>
+
+            <path d="M352 1228 L480 1238" class="arrow"></path>
+            <path d="M687 1228 L480 1238" class="arrow"></path>
+            <circle cx="480" cy="1238" r="21" class="nonlinear"></circle>
+            <text x="480" y="1245" text-anchor="middle" font-size="24" fill="#111827">×</text>
+
+            <path d="M480 1259 L480 1277" class="arrow"></path>
+            <rect x="390" y="1277" width="180" height="34" rx="6" class="moe hot"></rect>
+            <text x="480" y="1299" text-anchor="middle" class="label">Expert down GEMM</text>
+            <text x="585" y="1299" class="dtype-fp16">R1</text>
+            <rect x="610" y="1269" width="140" height="52" rx="6" class="quant"></rect>
+            <text x="680" y="1290" text-anchor="middle" class="small">R7 dequant</text>
+            <text x="680" y="1308" text-anchor="middle" class="small">rescale / cast</text>
+            <path d="M570 1294 L610 1294" class="arrow" stroke-dasharray="5 4"></path>
+
+            <rect x="610" y="1048" width="145" height="45" rx="7" class="box"></rect>
+            <text x="682" y="1067" text-anchor="middle" class="small">Expert dispatch</text>
+            <text x="682" y="1084" text-anchor="middle" class="small">permute / combine</text>
+            <text x="760" y="1078" class="dtype-fp16">FP16</text>
+
+            <rect x="700" y="82" width="205" height="114" rx="8" fill="#fff" stroke="#d8e0ec"></rect>
+            <rect x="718" y="104" width="70" height="20" rx="4" class="box"></rect>
+            <text x="802" y="119" class="small">activation / residual</text>
+            <rect x="718" y="136" width="70" height="20" rx="4" class="linear"></rect>
+            <text x="802" y="151" class="small">linear / norm</text>
+            <rect x="718" y="168" width="70" height="20" rx="4" class="nonlinear"></rect>
+            <text x="802" y="183" class="small">nonlinear / attention</text>
+
+            <rect x="720" y="222" width="200" height="126" rx="10" fill="#f8fbff" stroke="#93c5fd" stroke-width="2"></rect>
+            <text x="820" y="248" text-anchor="middle" class="label">System Communication</text>
+            <text x="820" y="272" text-anchor="middle" class="stage-label" style="font-size:17px">R2 all_reduce / NCCL</text>
+            <text x="820" y="298" text-anchor="middle" class="small">TP / EP synchronization</text>
+            <text x="820" y="318" text-anchor="middle" class="small">BF16 18.1% → FP8 19.9%</text>
+            <path d="M720 292 C690 292, 672 292, 646 286" class="arrow" stroke-dasharray="6 5"></path>
+            <path d="M820 348 C755 430, 690 720, 610 768" class="arrow" stroke-dasharray="6 5"></path>
+          </svg>
+        </div>
+        <div class="legend">
+          <div class="legend-item"><span class="swatch" style="background:#fee2e2;border-color:#ef4444"></span>红框：预计 Top kernel / FP8 重点收益点</div>
+          <div class="legend-item"><span class="swatch" style="background:#dff3df;border-color:#8bc68c"></span>绿色：线性层、GEMM 或 norm</div>
+          <div class="legend-item"><span class="swatch" style="background:#eadcf6;border-color:#c4a3dc"></span>紫色：Attention、RoPE、SiLU 等非线性路径</div>
+          <div class="legend-item"><span class="swatch" style="background:#fff7ed;border-color:#f59e0b"></span>橙色：MoE router / expert 路径</div>
+          <div class="legend-item"><span class="swatch" style="background:#fef3c7;border-color:#d97706"></span>黄色：R7 FP8 Q/DQ、scale、cast、layout 转换开销</div>
+        </div>
+        <p class="notes">
+          绘图依据：FP8 报告图 3 的数据类型标注方式。为了贴合 Qwen3.5-122B-A10B，这里把 FFN 扩展为 MoE expert 路径，
+          并把 attention 改为 Hybrid Attention：不同层或不同 token 可走 full、sliding window、sparse/global 路径。
+          这会改变 KV cache 读量和 attention kernel 排名，但不改变“GEMM 与 KV cache 优先 FP8”的主判断。
+        </p>
+      </section>
+
+      <aside class="card">
+        <h2>已有 Profile 映射</h2>
+        <table class="profile-table" aria-label="BF16 FP8 kernel耗时占比对比">
+          <thead>
+            <tr><th>Rank</th><th>Kernel 类别</th><th>BF16</th><th>FP8</th><th>变化</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>1</td><td>Fused MoE</td><td>28.9%</td><td>23.8%</td><td class="delta-down">-5.1pp</td></tr>
+            <tr><td>2</td><td>all_reduce / NCCL</td><td>18.1%</td><td>19.9%</td><td class="delta-up">+1.8pp</td></tr>
+            <tr><td>3</td><td>dense GEMM / DG + nvjet</td><td>7.9%</td><td>8.7%</td><td class="delta-up">+0.8pp</td></tr>
+            <tr><td>4</td><td>FlashAttention</td><td>7.9%</td><td>8.2%</td><td class="delta-up">+0.3pp</td></tr>
+            <tr><td>5</td><td>RMSNorm reduce + Triton</td><td>9.0%</td><td>10.1%</td><td class="delta-up">+1.1pp</td></tr>
+            <tr><td>6</td><td>GDN 线性注意力</td><td>9.4%</td><td>9.5%</td><td class="delta-flat">+0.1pp</td></tr>
+            <tr><td>7</td><td>Quant / FP8 独有</td><td>0.0%</td><td>5.3%</td><td class="delta-up">+5.3pp</td></tr>
+            <tr><td>8</td><td>Other / elementwise / SiLU / routing</td><td>14.1%</td><td>14.5%</td><td class="delta-up">+0.4pp</td></tr>
+          </tbody>
+        </table>
+        <p class="notes">
+          这组数据说明：FP8 已经显著压低 Fused MoE 占比，但新增 quant 开销、NCCL 通信以及小算子占比被动上升。
+          Quant / FP8 独有是 BF16 路径没有的量化手续费，包括 Q/DQ、scale、cast、layout transform、packing 等。
+          因此后续优化重点不只是继续压 GEMM，还要减少 Q/DQ、通信等待和 RMSNorm/elementwise 碎片。
+        </p>
+
+        <h2>R1-R8 怎么读</h2>
+        <p class="notes">
+          R 表示 profile ranking bucket，也就是按耗时占比排出来的开销类别编号；它不是 Transformer layer 编号，
+          也不是执行顺序编号。R1 只是当前 profile 中最大的 bucket，R2 是第二大的 bucket，以此类推。
+        </p>
+        <table class="profile-table" aria-label="R编号含义">
+          <thead>
+            <tr><th>标记</th><th>含义</th><th>画在图上的位置</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>R1</td><td>Fused MoE Expert GEMM</td><td>MoE up/gate/down expert GEMM</td></tr>
+            <tr><td>R2</td><td>all_reduce / NCCL</td><td>TP8 / EP 的跨卡同步边界</td></tr>
+            <tr><td>R3</td><td>dense GEMM / DG + NvJet</td><td>QKV、O projection、非 MoE dense linear</td></tr>
+            <tr><td>R4</td><td>FlashAttention</td><td>full attention 或可走 FA 的 attention path</td></tr>
+            <tr><td>R5</td><td>RMSNorm reduce + Triton</td><td>Attention 前、MoE 前后的 norm</td></tr>
+            <tr><td>R6</td><td>GDN 线性注意力</td><td>Hybrid Attention 中的 GDN / linear attention 分支</td></tr>
+            <tr><td>R7</td><td>Quant / FP8 独有</td><td>Q/DQ、scale、cast、layout transform 等转换链路</td></tr>
+            <tr><td>R8</td><td>Other</td><td>elementwise、SiLU、routing、dispatch/combine</td></tr>
+          </tbody>
+        </table>
+
+        <h2>Kernel 耗时开销排名</h2>
+        <h3>Prefill</h3>
+        <ol class="rank-list">
+          <li class="rank-item"><span class="rank-num">1</span><div><b>MoE Expert GEMM</b><span>top-k expert 的 up/gate/down grouped GEMM，A10B active 参数下通常是最大计算项。</span></div><span class="badge">FP8</span></li>
+          <li class="rank-item"><span class="rank-num">2</span><div><b>QKV / O Projection</b><span>dense GEMM；QKV scale 拆分会损失融合收益，报告中 Fused QKV 是关键优化。</span></div><span class="badge">FP8</span></li>
+          <li class="rank-item"><span class="rank-num">3</span><div><b>Hybrid Attention</b><span>Full 层吃全局 KV；Sliding 层只读窗口 KV；Sparse/Global 层看模式实现。核心仍是 HBM IO。</span></div><span class="badge blue">FA3/4</span></li>
+          <li class="rank-item"><span class="rank-num">4</span><div><b>MoE Dispatch / Combine</b><span>routing、token permutation、expert 分桶；多卡 expert parallel 时通信放大。</span></div><span class="badge blue">调度</span></li>
+          <li class="rank-item"><span class="rank-num">5</span><div><b>Norm / RoPE / Activation</b><span>单项小但碎片多，影响尾延迟和 kernel launch 开销。</span></div><span class="badge blue">融合</span></li>
+        </ol>
+
+        <h3>Decode</h3>
+        <ol class="rank-list">
+          <li class="rank-item"><span class="rank-num">1</span><div><b>Hybrid KV Attention</b><span>Full attention 读全历史 K/V，sliding window 读局部窗口；FP8 KV cache 对两者都减半容量和带宽。</span></div><span class="badge">FP8 KV</span></li>
+          <li class="rank-item"><span class="rank-num">2</span><div><b>MoE Grouped GEMM</b><span>batch 小时 GEMM 形状偏瘦，kernel 利用率决定收益。</span></div><span class="badge">FP8</span></li>
+          <li class="rank-item"><span class="rank-num">3</span><div><b>QKV / O GEMM</b><span>decode 下受小 batch 和 layout 影响，需要定制 GEMM 或 fused path。</span></div><span class="badge">FP8</span></li>
+          <li class="rank-item"><span class="rank-num">4</span><div><b>TP / EP 通信</b><span>122B 级别多卡部署下，all-reduce、dispatch、KV 迁移可能进前五。</span></div><span class="badge blue">通信</span></li>
+          <li class="rank-item"><span class="rank-num">5</span><div><b>Sampling / Scheduler</b><span>不一定占平均吞吐大头，但会影响 P95/P99。</span></div><span class="badge blue">尾延迟</span></li>
+        </ol>
+
+        <h2 style="margin-top:18px;">FP8 理论收益空间</h2>
+        <div class="split">
+          <div class="metric"><strong>244GB → 122GB</strong><span>122B 权重从 BF16 到 FP8，理论权重显存约减半，scale/metadata 另计。</span></div>
+          <div class="metric"><strong>20GB → 10GB</strong><span>A10B active 参数每 token 权重读取量约减半，decode memory-bound 时最明显。</span></div>
+          <div class="metric"><strong>1.4x ~ 1.8x</strong><span>更现实的端到端收益区间，需 FP8 GEMM、Fused QKV、FP8 KV cache 都生效。</span></div>
+          <div class="metric"><strong>2x+</strong><span>局部 kernel 上限，通常需要 Hopper/Blackwell FP8 Tensor Core、FA3/FA4 和调度配合。</span></div>
+        </div>
+
+        <p class="notes">
+          FP8 报告给出的工程经验：Opt-0 全流程 FP8 仅大 batch 最多 19%，小 batch 可负优化；
+          CUTLASS FP8 GEMM 平均 1.33x，Fused QKV 平均 1.38x，加入 FP8 KV cache 后平均 1.54x。
+          因此这张图强调“FP8 路径 + kernel 融合 + KV cache”必须同时成立。
+        </p>
+      </aside>
+    </div>
+
+    <section class="explain-grid" aria-label="dense GEMM and TP8 communication diagrams">
+      <article class="explain-card">
+        <h2>图 2：dense GEMM / DG + NvJet 是什么</h2>
+        <p>
+          这里的 dense GEMM 指非 MoE 的普通 dense linear 矩阵乘法，主要来自 QKV projection、O projection、部分输出/辅助 linear。
+          `DG + NvJet` 按 profile label 理解为 dense GEMM 进入的优化 kernel/backend 路径，不是 MoE expert GEMM。
+        </p>
+        <div class="mini-diagram">
+          <svg viewBox="0 0 760 360" role="img" aria-label="dense GEMM DG NvJet mapping">
+            <defs>
+              <marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#111827"></path>
+              </marker>
+            </defs>
+            <text x="380" y="34" text-anchor="middle" class="stage-label">Dense GEMM Path (R3)</text>
+            <rect x="45" y="78" width="150" height="58" rx="8" class="mini-node"></rect>
+            <text x="120" y="103" text-anchor="middle" class="label">hidden state</text>
+            <text x="120" y="122" text-anchor="middle" class="small">BF16 / FP16 activation</text>
+            <path d="M195 107 L255 107" class="arrow" marker-end="url(#arrow2)"></path>
+            <rect x="255" y="70" width="190" height="74" rx="8" class="mini-hot"></rect>
+            <text x="350" y="100" text-anchor="middle" class="label">Dense Linear GEMM</text>
+            <text x="350" y="121" text-anchor="middle" class="small">QKV / O / dense projection</text>
+            <path d="M445 107 L505 107" class="arrow" marker-end="url(#arrow2)"></path>
+            <rect x="505" y="70" width="190" height="74" rx="8" class="mini-blue"></rect>
+            <text x="600" y="100" text-anchor="middle" class="label">DG + NvJet</text>
+            <text x="600" y="121" text-anchor="middle" class="small">optimized dense GEMM backend</text>
+
+            <rect x="80" y="205" width="220" height="82" rx="8" class="mini-amber"></rect>
+            <text x="190" y="232" text-anchor="middle" class="label">不是 Fused MoE</text>
+            <text x="190" y="253" text-anchor="middle" class="small">MoE expert grouped GEMM 是 R1</text>
+            <text x="190" y="272" text-anchor="middle" class="small">dense GEMM 是 R3</text>
+            <rect x="395" y="205" width="260" height="82" rx="8" class="mini-green"></rect>
+            <text x="525" y="232" text-anchor="middle" class="label">FP8 后占比上升</text>
+            <text x="525" y="253" text-anchor="middle" class="small">7.9% → 8.7% 多数是相对占比</text>
+            <text x="525" y="272" text-anchor="middle" class="small">MoE 变快后 R3 更显眼</text>
+          </svg>
+        </div>
+      </article>
+
+      <article class="explain-card">
+        <h2>图 3：TP8 Transformer Block 内通信</h2>
+        <p>
+          TP8 表示一个 Transformer block 的大矩阵按 tensor parallel 切到 8 张 GPU。每张 GPU 计算 partial output，
+          在某些 projection 或 MLP/MoE 边界需要 all_reduce / reduce_scatter / all_gather 同步。
+        </p>
+        <div class="mini-diagram">
+          <svg viewBox="0 0 760 360" role="img" aria-label="TP8 transformer block communication">
+            <text x="380" y="34" text-anchor="middle" class="stage-label">TP8 inside one Transformer Block</text>
+            <rect x="36" y="72" width="86" height="54" rx="8" class="mini-blue"></rect>
+            <text x="79" y="103" text-anchor="middle" class="label">GPU0</text>
+            <rect x="128" y="72" width="86" height="54" rx="8" class="mini-blue"></rect>
+            <text x="171" y="103" text-anchor="middle" class="label">GPU1</text>
+            <rect x="220" y="72" width="86" height="54" rx="8" class="mini-blue"></rect>
+            <text x="263" y="103" text-anchor="middle" class="label">GPU2</text>
+            <rect x="312" y="72" width="86" height="54" rx="8" class="mini-blue"></rect>
+            <text x="355" y="103" text-anchor="middle" class="label">GPU3</text>
+            <rect x="404" y="72" width="86" height="54" rx="8" class="mini-blue"></rect>
+            <text x="447" y="103" text-anchor="middle" class="label">GPU4</text>
+            <rect x="496" y="72" width="86" height="54" rx="8" class="mini-blue"></rect>
+            <text x="539" y="103" text-anchor="middle" class="label">GPU5</text>
+            <rect x="588" y="72" width="86" height="54" rx="8" class="mini-blue"></rect>
+            <text x="631" y="103" text-anchor="middle" class="label">GPU6</text>
+            <rect x="680" y="72" width="50" height="54" rx="8" class="mini-blue"></rect>
+            <text x="705" y="103" text-anchor="middle" class="label">G7</text>
+
+            <rect x="90" y="172" width="220" height="70" rx="8" class="mini-hot"></rect>
+            <text x="200" y="199" text-anchor="middle" class="label">Column / Row Parallel GEMM</text>
+            <text x="200" y="220" text-anchor="middle" class="small">each GPU computes shard</text>
+            <rect x="450" y="172" width="220" height="70" rx="8" class="mini-amber"></rect>
+            <text x="560" y="199" text-anchor="middle" class="label">R2 all_reduce / NCCL</text>
+            <text x="560" y="220" text-anchor="middle" class="small">partial outputs become full tensor</text>
+
+            <path d="M79 126 C120 145, 160 155, 200 172" class="arrow" marker-end="url(#arrow)"></path>
+            <path d="M355 126 C315 145, 250 155, 220 172" class="arrow" marker-end="url(#arrow)"></path>
+            <path d="M631 126 C600 145, 580 155, 560 172" class="arrow" marker-end="url(#arrow)"></path>
+            <path d="M310 207 L450 207" class="arrow" marker-end="url(#arrow)"></path>
+            <rect x="180" y="285" width="400" height="42" rx="8" class="mini-green"></rect>
+            <text x="380" y="311" text-anchor="middle" class="label">FP8 makes GEMM faster; communication share can rise</text>
+          </svg>
+        </div>
+      </article>
+
+      <article class="explain-card">
+        <h2>图 4：TP8 跨机器部署通信</h2>
+        <p>
+          如果 TP8 跨机器，all_reduce 不再只走机内 NVLink/NVSwitch，还会跨节点网络。跨机器 TP 会显著放大 R2，
+          因为每个 block 的同步都可能穿过较慢链路。
+        </p>
+        <div class="mini-diagram">
+          <svg viewBox="0 0 760 360" role="img" aria-label="TP8 cross-machine communication">
+            <text x="380" y="34" text-anchor="middle" class="stage-label">TP8 across machines</text>
+            <rect x="60" y="78" width="260" height="160" rx="12" fill="#f8fbff" stroke="#60a5fa" stroke-width="2"></rect>
+            <text x="190" y="105" text-anchor="middle" class="label">Machine A</text>
+            <rect x="88" y="130" width="52" height="42" rx="7" class="mini-blue"></rect><text x="114" y="156" text-anchor="middle" class="small">G0</text>
+            <rect x="150" y="130" width="52" height="42" rx="7" class="mini-blue"></rect><text x="176" y="156" text-anchor="middle" class="small">G1</text>
+            <rect x="212" y="130" width="52" height="42" rx="7" class="mini-blue"></rect><text x="238" y="156" text-anchor="middle" class="small">G2</text>
+            <rect x="274" y="130" width="28" height="42" rx="7" class="mini-blue"></rect><text x="288" y="156" text-anchor="middle" class="small">G3</text>
+            <text x="190" y="210" text-anchor="middle" class="small">intra-node: NVLink / NVSwitch</text>
+
+            <rect x="440" y="78" width="260" height="160" rx="12" fill="#f8fbff" stroke="#60a5fa" stroke-width="2"></rect>
+            <text x="570" y="105" text-anchor="middle" class="label">Machine B</text>
+            <rect x="468" y="130" width="52" height="42" rx="7" class="mini-blue"></rect><text x="494" y="156" text-anchor="middle" class="small">G4</text>
+            <rect x="530" y="130" width="52" height="42" rx="7" class="mini-blue"></rect><text x="556" y="156" text-anchor="middle" class="small">G5</text>
+            <rect x="592" y="130" width="52" height="42" rx="7" class="mini-blue"></rect><text x="618" y="156" text-anchor="middle" class="small">G6</text>
+            <rect x="654" y="130" width="28" height="42" rx="7" class="mini-blue"></rect><text x="668" y="156" text-anchor="middle" class="small">G7</text>
+            <text x="570" y="210" text-anchor="middle" class="small">intra-node: NVLink / NVSwitch</text>
+
+            <path d="M320 158 C360 122, 400 122, 440 158" class="arrow" marker-end="url(#arrow)" stroke-dasharray="8 6"></path>
+            <path d="M440 182 C400 218, 360 218, 320 182" class="arrow" marker-end="url(#arrow)" stroke-dasharray="8 6"></path>
+            <rect x="260" y="266" width="240" height="54" rx="8" class="mini-amber"></rect>
+            <text x="380" y="288" text-anchor="middle" class="label">cross-node all_reduce</text>
+            <text x="380" y="308" text-anchor="middle" class="small">slower link, higher latency, harder overlap</text>
+          </svg>
+        </div>
+      </article>
+
+      <article class="explain-card">
+        <h2>图 5：不同 layer 之间的关系</h2>
+        <p>
+          Hybrid Attention 往往不是每层完全相同。某些层承担 full/global 信息汇聚，某些层使用 sliding/local attention；
+          每个 layer 基本对应一个 Transformer block：Attention 子层 + MoE/MLP 子层 + residual/norm。
+          TP8 通信可能在每个 block 的 dense projection 或 MoE/MLP 边界出现。
+        </p>
+        <div class="mini-diagram">
+          <svg viewBox="0 0 760 360" role="img" aria-label="layer relationships in hybrid attention MoE model">
+            <text x="380" y="34" text-anchor="middle" class="stage-label">Layer stack relationship</text>
+            <rect x="45" y="72" width="150" height="215" rx="10" class="mini-node"></rect>
+            <text x="120" y="98" text-anchor="middle" class="label">Layer 0</text>
+            <rect x="70" y="120" width="100" height="42" rx="7" class="mini-hot"></rect>
+            <text x="120" y="146" text-anchor="middle" class="small">Full Attn</text>
+            <rect x="70" y="190" width="100" height="42" rx="7" class="mini-amber"></rect>
+            <text x="120" y="216" text-anchor="middle" class="small">MoE FFN</text>
+
+            <rect x="225" y="72" width="150" height="215" rx="10" class="mini-node"></rect>
+            <text x="300" y="98" text-anchor="middle" class="label">Layer 1</text>
+            <rect x="250" y="120" width="100" height="42" rx="7" class="mini-green"></rect>
+            <text x="300" y="146" text-anchor="middle" class="small">Sliding Attn</text>
+            <rect x="250" y="190" width="100" height="42" rx="7" class="mini-amber"></rect>
+            <text x="300" y="216" text-anchor="middle" class="small">MoE FFN</text>
+
+            <rect x="405" y="72" width="150" height="215" rx="10" class="mini-node"></rect>
+            <text x="480" y="98" text-anchor="middle" class="label">Layer 2</text>
+            <rect x="430" y="120" width="100" height="42" rx="7" class="mini-blue"></rect>
+            <text x="480" y="146" text-anchor="middle" class="small">GDN / Linear</text>
+            <rect x="430" y="190" width="100" height="42" rx="7" class="mini-amber"></rect>
+            <text x="480" y="216" text-anchor="middle" class="small">MoE FFN</text>
+
+            <rect x="585" y="72" width="130" height="215" rx="10" class="mini-node"></rect>
+            <text x="650" y="98" text-anchor="middle" class="label">Layer N</text>
+            <rect x="610" y="120" width="80" height="42" rx="7" class="mini-hot"></rect>
+            <text x="650" y="146" text-anchor="middle" class="small">Global</text>
+            <rect x="610" y="190" width="80" height="42" rx="7" class="mini-amber"></rect>
+            <text x="650" y="216" text-anchor="middle" class="small">MoE</text>
+
+            <path d="M195 178 L225 178" class="arrow" marker-end="url(#arrow)"></path>
+            <path d="M375 178 L405 178" class="arrow" marker-end="url(#arrow)"></path>
+            <path d="M555 178 L585 178" class="arrow" marker-end="url(#arrow)"></path>
+            <text x="380" y="324" text-anchor="middle" class="small">Layer == repeated Transformer Block: Attention + MoE/MLP + residual/norm + TP8 collectives.</text>
+          </svg>
+        </div>
+      </article>
+
+      <article class="explain-card">
+        <h2>图 6：Layer 与 Transformer Block 的关系</h2>
+        <p>
+          在 decoder-only LLM 中，一个 layer 通常就是一个重复的 Transformer block。每个 block 内部先走 attention 子层，
+          再走 MLP/MoE 子层，两个子层周围都有 RMSNorm 和 residual。Hybrid Attention 表示不同 block 的 attention 子层可以采用不同模式。
+        </p>
+        <div class="mini-diagram">
+          <svg viewBox="0 0 760 360" role="img" aria-label="Layer and Transformer block relationship">
+            <text x="380" y="34" text-anchor="middle" class="stage-label">Layer stack = repeated Transformer Blocks</text>
+            <rect x="35" y="70" width="150" height="230" rx="10" class="mini-node"></rect>
+            <text x="110" y="96" text-anchor="middle" class="label">Layer i</text>
+            <rect x="60" y="118" width="100" height="36" rx="7" class="mini-blue"></rect>
+            <text x="110" y="141" text-anchor="middle" class="small">RMSNorm</text>
+            <rect x="60" y="166" width="100" height="46" rx="7" class="mini-hot"></rect>
+            <text x="110" y="193" text-anchor="middle" class="small">Attention</text>
+            <rect x="60" y="224" width="100" height="46" rx="7" class="mini-amber"></rect>
+            <text x="110" y="251" text-anchor="middle" class="small">MoE / MLP</text>
+
+            <path d="M185 185 L230 185" class="arrow" marker-end="url(#arrow)"></path>
+            <rect x="230" y="70" width="150" height="230" rx="10" class="mini-node"></rect>
+            <text x="305" y="96" text-anchor="middle" class="label">Layer i+1</text>
+            <rect x="255" y="118" width="100" height="36" rx="7" class="mini-blue"></rect>
+            <text x="305" y="141" text-anchor="middle" class="small">RMSNorm</text>
+            <rect x="255" y="166" width="100" height="46" rx="7" class="mini-green"></rect>
+            <text x="305" y="193" text-anchor="middle" class="small">Sliding Attn</text>
+            <rect x="255" y="224" width="100" height="46" rx="7" class="mini-amber"></rect>
+            <text x="305" y="251" text-anchor="middle" class="small">MoE / MLP</text>
+
+            <path d="M380 185 L425 185" class="arrow" marker-end="url(#arrow)"></path>
+            <rect x="425" y="70" width="150" height="230" rx="10" class="mini-node"></rect>
+            <text x="500" y="96" text-anchor="middle" class="label">Layer i+2</text>
+            <rect x="450" y="118" width="100" height="36" rx="7" class="mini-blue"></rect>
+            <text x="500" y="141" text-anchor="middle" class="small">RMSNorm</text>
+            <rect x="450" y="166" width="100" height="46" rx="7" class="mini-blue"></rect>
+            <text x="500" y="193" text-anchor="middle" class="small">GDN / Linear</text>
+            <rect x="450" y="224" width="100" height="46" rx="7" class="mini-amber"></rect>
+            <text x="500" y="251" text-anchor="middle" class="small">MoE / MLP</text>
+
+            <path d="M575 185 L615 185" class="arrow" marker-end="url(#arrow)" stroke-dasharray="6 5"></path>
+            <text x="665" y="180" text-anchor="middle" class="label">...</text>
+            <text x="380" y="330" text-anchor="middle" class="small">关系：layer 是堆叠单位；block 是 layer 内的计算结构；attention mode 可以按层交替或分组。</text>
+          </svg>
+        </div>
+      </article>
+
+      <article class="explain-card">
+        <h2>图 7：MoE / MLP 边界上的 TP8 同步</h2>
+        <p>
+          这张图是把图 1 的 MoE Feed Forward Layer 展开：图 1 里的 Router/Gate、Top-k Expert up GEMM、
+          Expert gate GEMM、SiLU/乘法、Expert down GEMM 在这里被串成执行路径；绿色节点是这些模块边界上可能发生的 TP8/EP collectives。
+        </p>
+        <div class="mini-diagram">
+          <svg viewBox="0 0 760 470" role="img" aria-label="MoE feed forward layer module relation with collectives">
+            <text x="380" y="34" text-anchor="middle" class="stage-label">图 1 MoE Feed Forward Layer 的展开</text>
+
+            <rect x="40" y="70" width="148" height="54" rx="8" class="mini-blue"></rect>
+            <text x="114" y="93" text-anchor="middle" class="label">图1: activation</text>
+            <text x="114" y="112" text-anchor="middle" class="small">MoE input h</text>
+            <path d="M188 97 L228 97" class="arrow" marker-end="url(#arrow)"></path>
+            <rect x="228" y="70" width="142" height="54" rx="8" class="mini-green"></rect>
+            <text x="299" y="93" text-anchor="middle" class="label">all_gather?</text>
+            <text x="299" y="112" text-anchor="middle" class="small">if full hidden needed</text>
+            <path d="M370 97 L410 97" class="arrow" marker-end="url(#arrow)"></path>
+            <rect x="410" y="70" width="165" height="54" rx="8" class="mini-amber"></rect>
+            <text x="492" y="93" text-anchor="middle" class="label">图1: Router / Gate</text>
+            <text x="492" y="112" text-anchor="middle" class="small">select top-k experts</text>
+            <path d="M575 97 L615 97" class="arrow" marker-end="url(#arrow)"></path>
+            <rect x="615" y="70" width="105" height="54" rx="8" class="mini-green"></rect>
+            <text x="667" y="93" text-anchor="middle" class="label">dispatch</text>
+            <text x="667" y="112" text-anchor="middle" class="small">EP exchange</text>
+
+            <path d="M667 124 L667 158" class="arrow" marker-end="url(#arrow)"></path>
+            <rect x="525" y="158" width="190" height="58" rx="8" class="mini-hot"></rect>
+            <text x="620" y="182" text-anchor="middle" class="label">图1: Top-k Expert up GEMM</text>
+            <text x="620" y="202" text-anchor="middle" class="small">part of R1 Fused MoE</text>
+            <path d="M525 187 L430 187" class="arrow" marker-end="url(#arrow)"></path>
+            <rect x="240" y="158" width="190" height="58" rx="8" class="mini-hot"></rect>
+            <text x="335" y="182" text-anchor="middle" class="label">图1: Expert gate GEMM</text>
+            <text x="335" y="202" text-anchor="middle" class="small">part of R1 Fused MoE</text>
+
+            <path d="M620 216 C590 250, 515 260, 470 276" class="arrow" marker-end="url(#arrow)"></path>
+            <path d="M335 216 C370 250, 420 260, 470 276" class="arrow" marker-end="url(#arrow)"></path>
+            <rect x="392" y="276" width="156" height="58" rx="8" class="mini-node"></rect>
+            <text x="470" y="299" text-anchor="middle" class="label">图1: SiLU + multiply</text>
+            <text x="470" y="318" text-anchor="middle" class="small">elementwise, not GEMM</text>
+
+            <path d="M470 334 L470 366" class="arrow" marker-end="url(#arrow)"></path>
+            <rect x="360" y="366" width="220" height="58" rx="8" class="mini-hot"></rect>
+            <text x="470" y="390" text-anchor="middle" class="label">图1: Expert down GEMM</text>
+            <text x="470" y="410" text-anchor="middle" class="small">part of R1 Fused MoE output</text>
+
+            <path d="M360 395 L250 395" class="arrow" marker-end="url(#arrow)"></path>
+            <rect x="70" y="366" width="180" height="58" rx="8" class="mini-green"></rect>
+            <text x="160" y="390" text-anchor="middle" class="label">reduce_scatter / all_reduce</text>
+            <text x="160" y="410" text-anchor="middle" class="small">R2 boundary sync</text>
+
+            <rect x="594" y="286" width="132" height="86" rx="8" class="mini-node"></rect>
+            <text x="660" y="310" text-anchor="middle" class="label">关系</text>
+            <text x="660" y="331" text-anchor="middle" class="small">图7不是新层</text>
+            <text x="660" y="350" text-anchor="middle" class="small">它展开图1 MoE</text>
+
+            <text x="380" y="452" text-anchor="middle" class="small">Fused MoE Expert GEMM = 图1 中 up/gate/down expert GEMM 的 fused/grouped 执行；collectives 是这些模块前后的边界同步。</text>
+          </svg>
+        </div>
+      </article>
+
+      <article class="explain-card wide">
+        <h2>图 8：TP8 层间传递与一机 8 卡 MoE Expert 分布动态图</h2>
+        <p>
+          这张动态图把两个概念放在一起：上半部分表示 TP8 下每层输出通常以 8 个 shard 在 GPU0-GPU7 之间传递，
+          并在必要边界触发 all_reduce / reduce_scatter / all_gather；下半部分表示一机 8 卡时，MoE experts 按 owner GPU 分布，
+          router 选择 top-k experts 后把 token dispatch 到对应 GPU，本地执行 grouped expert GEMM，再 combine 回下一层输入。
+        </p>
+        <div class="mini-diagram">
+          <svg viewBox="0 0 1160 720" role="img" aria-label="TP8 inter-layer transfer and MoE expert distribution animation">
+            <defs>
+              <marker id="arrow-flow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"></path>
+              </marker>
+              <path id="layer-flow" d="M150 95 C300 70, 420 70, 560 95 S820 120, 980 95"></path>
+              <path id="collective-flow" d="M560 145 C520 185, 485 215, 430 225 S310 230, 250 255"></path>
+              <path id="dispatch-a" d="M215 410 C350 360, 470 345, 615 390"></path>
+              <path id="dispatch-b" d="M215 430 C420 430, 555 455, 760 430"></path>
+              <path id="dispatch-c" d="M215 450 C480 515, 690 520, 905 470"></path>
+              <path id="combine-flow" d="M905 545 C740 610, 505 605, 260 545"></path>
+            </defs>
+
+            <text x="580" y="36" text-anchor="middle" class="stage-label">TP8: Layer-to-Layer Shard Flow + MoE Expert Owner Mapping</text>
+
+            <rect x="40" y="60" width="250" height="120" rx="10" class="mini-blue"></rect>
+            <text x="165" y="88" text-anchor="middle" class="label">Layer i output</text>
+            <text x="165" y="110" text-anchor="middle" class="small">h = [h0...h7] sharded on TP8</text>
+            <g>
+              <rect x="70" y="130" width="22" height="24" rx="4" class="shard-chip"></rect><text x="81" y="147" text-anchor="middle" class="small">0</text>
+              <rect x="98" y="130" width="22" height="24" rx="4" class="shard-chip"></rect><text x="109" y="147" text-anchor="middle" class="small">1</text>
+              <rect x="126" y="130" width="22" height="24" rx="4" class="shard-chip"></rect><text x="137" y="147" text-anchor="middle" class="small">2</text>
+              <rect x="154" y="130" width="22" height="24" rx="4" class="shard-chip"></rect><text x="165" y="147" text-anchor="middle" class="small">3</text>
+              <rect x="182" y="130" width="22" height="24" rx="4" class="shard-chip"></rect><text x="193" y="147" text-anchor="middle" class="small">4</text>
+              <rect x="210" y="130" width="22" height="24" rx="4" class="shard-chip"></rect><text x="221" y="147" text-anchor="middle" class="small">5</text>
+              <rect x="238" y="130" width="22" height="24" rx="4" class="shard-chip"></rect><text x="249" y="147" text-anchor="middle" class="small">6</text>
+            </g>
+
+            <rect x="430" y="70" width="260" height="100" rx="10" class="sync-chip"></rect>
+            <text x="560" y="99" text-anchor="middle" class="label">TP8 boundary collective</text>
+            <text x="560" y="122" text-anchor="middle" class="small">all_reduce / reduce_scatter / all_gather</text>
+            <text x="560" y="145" text-anchor="middle" class="small">profile bucket: R2</text>
+
+            <rect x="860" y="60" width="250" height="120" rx="10" class="mini-blue"></rect>
+            <text x="985" y="88" text-anchor="middle" class="label">Layer i+1 input</text>
+            <text x="985" y="110" text-anchor="middle" class="small">consume sharded or gathered hidden</text>
+            <g>
+              <rect x="890" y="130" width="22" height="24" rx="4" class="shard-chip"></rect><text x="901" y="147" text-anchor="middle" class="small">0</text>
+              <rect x="918" y="130" width="22" height="24" rx="4" class="shard-chip"></rect><text x="929" y="147" text-anchor="middle" class="small">1</text>
+              <rect x="946" y="130" width="22" height="24" rx="4" class="shard-chip"></rect><text x="957" y="147" text-anchor="middle" class="small">2</text>
+              <rect x="974" y="130" width="22" height="24" rx="4" class="shard-chip"></rect><text x="985" y="147" text-anchor="middle" class="small">3</text>
+              <rect x="1002" y="130" width="22" height="24" rx="4" class="shard-chip"></rect><text x="1013" y="147" text-anchor="middle" class="small">4</text>
+              <rect x="1030" y="130" width="22" height="24" rx="4" class="shard-chip"></rect><text x="1041" y="147" text-anchor="middle" class="small">5</text>
+              <rect x="1058" y="130" width="22" height="24" rx="4" class="shard-chip"></rect><text x="1069" y="147" text-anchor="middle" class="small">6</text>
+            </g>
+
+            <use href="#layer-flow" class="flow-path comm" marker-end="url(#arrow-flow)"></use>
+            <use href="#collective-flow" class="flow-path comm" marker-end="url(#arrow-flow)"></use>
+            <circle r="8" fill="#2563eb" class="motion-dot">
+              <animateMotion dur="3.2s" repeatCount="indefinite" begin="0s">
+                <mpath href="#layer-flow"></mpath>
+              </animateMotion>
+            </circle>
+            <circle r="6" fill="#60a5fa" class="motion-dot">
+              <animateMotion dur="3.2s" repeatCount="indefinite" begin="1s">
+                <mpath href="#layer-flow"></mpath>
+              </animateMotion>
+            </circle>
+            <circle r="6" fill="#22c55e" class="motion-dot">
+              <animateMotion dur="2.8s" repeatCount="indefinite" begin=".4s">
+                <mpath href="#collective-flow"></mpath>
+              </animateMotion>
+            </circle>
+
+            <text x="580" y="225" text-anchor="middle" class="small">上半部分：layer 间传递的是 activation shard；只有边界需要 full hidden 或 partial sum 聚合时，才触发 R2 通信。</text>
+
+            <rect x="40" y="300" width="250" height="150" rx="10" class="mini-amber"></rect>
+            <text x="165" y="328" text-anchor="middle" class="label">Router on each TP rank</text>
+            <text x="165" y="350" text-anchor="middle" class="small">top-k: token -> expert id</text>
+            <text x="165" y="374" text-anchor="middle" class="small">routing / dispatch = R8 + possible R2</text>
+            <rect x="80" y="394" width="52" height="28" rx="6" class="expert-chip"></rect>
+            <text x="106" y="413" text-anchor="middle" class="small">tok A</text>
+            <rect x="140" y="394" width="52" height="28" rx="6" class="expert-chip"></rect>
+            <text x="166" y="413" text-anchor="middle" class="small">tok B</text>
+            <rect x="200" y="394" width="52" height="28" rx="6" class="expert-chip"></rect>
+            <text x="226" y="413" text-anchor="middle" class="small">tok C</text>
+
+            <rect x="380" y="292" width="730" height="268" rx="12" fill="#ffffff" stroke="#d8e0ec"></rect>
+            <text x="745" y="322" text-anchor="middle" class="label">Single node TP8: expert owner placement, example 16 experts / 8 GPUs</text>
+            <text x="745" y="344" text-anchor="middle" class="small">每张卡持有本 TP shard，同时拥有若干 expert weights；这里示例每卡 2 个 experts。</text>
+
+            <g>
+              <rect x="410" y="372" width="150" height="70" rx="8" class="gpu-card"></rect>
+              <text x="485" y="394" text-anchor="middle" class="label">GPU0 / TP0</text>
+              <rect x="432" y="407" width="48" height="22" rx="5" class="expert-chip"></rect><text x="456" y="423" text-anchor="middle" class="small">E0</text>
+              <rect x="490" y="407" width="48" height="22" rx="5" class="expert-chip"></rect><text x="514" y="423" text-anchor="middle" class="small">E8</text>
+
+              <rect x="590" y="372" width="150" height="70" rx="8" class="gpu-card"></rect>
+              <text x="665" y="394" text-anchor="middle" class="label">GPU1 / TP1</text>
+              <rect x="612" y="407" width="48" height="22" rx="5" class="expert-chip"></rect><text x="636" y="423" text-anchor="middle" class="small">E1</text>
+              <rect x="670" y="407" width="48" height="22" rx="5" class="expert-chip"></rect><text x="694" y="423" text-anchor="middle" class="small">E9</text>
+
+              <rect x="770" y="372" width="150" height="70" rx="8" class="gpu-card"></rect>
+              <text x="845" y="394" text-anchor="middle" class="label">GPU2 / TP2</text>
+              <rect x="792" y="407" width="48" height="22" rx="5" class="expert-chip"></rect><text x="816" y="423" text-anchor="middle" class="small">E2</text>
+              <rect x="850" y="407" width="48" height="22" rx="5" class="expert-chip"></rect><text x="874" y="423" text-anchor="middle" class="small">E10</text>
+
+              <rect x="950" y="372" width="130" height="70" rx="8" class="gpu-card"></rect>
+              <text x="1015" y="394" text-anchor="middle" class="label">GPU3 / TP3</text>
+              <rect x="966" y="407" width="44" height="22" rx="5" class="expert-chip"></rect><text x="988" y="423" text-anchor="middle" class="small">E3</text>
+              <rect x="1018" y="407" width="48" height="22" rx="5" class="expert-chip"></rect><text x="1042" y="423" text-anchor="middle" class="small">E11</text>
+
+              <rect x="410" y="462" width="150" height="70" rx="8" class="gpu-card"></rect>
+              <text x="485" y="484" text-anchor="middle" class="label">GPU4 / TP4</text>
+              <rect x="432" y="497" width="48" height="22" rx="5" class="expert-chip"></rect><text x="456" y="513" text-anchor="middle" class="small">E4</text>
+              <rect x="490" y="497" width="48" height="22" rx="5" class="expert-chip"></rect><text x="514" y="513" text-anchor="middle" class="small">E12</text>
+
+              <rect x="590" y="462" width="150" height="70" rx="8" class="gpu-card"></rect>
+              <text x="665" y="484" text-anchor="middle" class="label">GPU5 / TP5</text>
+              <rect x="612" y="497" width="48" height="22" rx="5" class="expert-chip"></rect><text x="636" y="513" text-anchor="middle" class="small">E5</text>
+              <rect x="670" y="497" width="48" height="22" rx="5" class="expert-chip"></rect><text x="694" y="513" text-anchor="middle" class="small">E13</text>
+
+              <rect x="770" y="462" width="150" height="70" rx="8" class="gpu-card"></rect>
+              <text x="845" y="484" text-anchor="middle" class="label">GPU6 / TP6</text>
+              <rect x="792" y="497" width="48" height="22" rx="5" class="expert-chip"></rect><text x="816" y="513" text-anchor="middle" class="small">E6</text>
+              <rect x="850" y="497" width="48" height="22" rx="5" class="expert-chip"></rect><text x="874" y="513" text-anchor="middle" class="small">E14</text>
+
+              <rect x="950" y="462" width="130" height="70" rx="8" class="gpu-card"></rect>
+              <text x="1015" y="484" text-anchor="middle" class="label">GPU7 / TP7</text>
+              <rect x="966" y="497" width="44" height="22" rx="5" class="expert-chip"></rect><text x="988" y="513" text-anchor="middle" class="small">E7</text>
+              <rect x="1018" y="497" width="48" height="22" rx="5" class="expert-chip"></rect><text x="1042" y="513" text-anchor="middle" class="small">E15</text>
+            </g>
+
+            <use href="#dispatch-a" class="flow-path moe-flow" marker-end="url(#arrow-flow)"></use>
+            <use href="#dispatch-b" class="flow-path moe-flow" marker-end="url(#arrow-flow)"></use>
+            <use href="#dispatch-c" class="flow-path moe-flow" marker-end="url(#arrow-flow)"></use>
+            <use href="#combine-flow" class="flow-path hot" marker-end="url(#arrow-flow)"></use>
+
+            <circle r="7" fill="#f59e0b" class="motion-dot">
+              <animateMotion dur="3s" repeatCount="indefinite" begin="0s">
+                <mpath href="#dispatch-a"></mpath>
+              </animateMotion>
+            </circle>
+            <circle r="7" fill="#f97316" class="motion-dot">
+              <animateMotion dur="3.4s" repeatCount="indefinite" begin=".35s">
+                <mpath href="#dispatch-b"></mpath>
+              </animateMotion>
+            </circle>
+            <circle r="7" fill="#fb923c" class="motion-dot">
+              <animateMotion dur="3.8s" repeatCount="indefinite" begin=".7s">
+                <mpath href="#dispatch-c"></mpath>
+              </animateMotion>
+            </circle>
+            <circle r="8" fill="#ef4444" class="motion-dot">
+              <animateMotion dur="3.6s" repeatCount="indefinite" begin="1.1s">
+                <mpath href="#combine-flow"></mpath>
+              </animateMotion>
+            </circle>
+
+            <rect x="60" y="590" width="1040" height="78" rx="10" fill="#fbfcff" stroke="#d8e0ec"></rect>
+            <text x="580" y="618" text-anchor="middle" class="label">读图规则</text>
+            <text x="580" y="642" text-anchor="middle" class="small">蓝点：TP8 activation shard / collective；橙点：token dispatch 到 expert owner；红点：expert grouped GEMM 后 combine 回 layer boundary。</text>
+            <text x="580" y="662" text-anchor="middle" class="small">如果 expert owner 跨机器，dispatch/combine 会从机内 NVLink/NVSwitch 变成跨节点通信，R2 占比会显著放大。</text>
+          </svg>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

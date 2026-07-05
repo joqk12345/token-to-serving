@@ -1,0 +1,120 @@
+title: "Large Language Model Systems: From Tokens to Serving Infrastructure"
+source_root: "downloads/llmsystem2026spring/source_pdfs"
+parts:
+  - title: "Part I — The Shape of the Problem"
+    chapters:
+      - number: 1
+        slug: "01-why-llm-systems"
+        title: "Why LLMs Are Systems Problems"
+        primary_sources:
+          - "llmsys-01-intro-14e74a426e4a7e3ed485a026e1f65b70.pdf"
+        thesis: "The visible capability of LLMs rests on system constraints: compute, memory, communication, data movement, and abstractions."
+      - number: 2
+        slug: "02-tokens-probability-transformers"
+        title: "From Next-Token Probability to Transformer Computation"
+        primary_sources:
+          - "llmsys-06-transformer-14bd7575a2f6c8bac60522354c11d691.pdf"
+          - "llmsys-07-llms-acf5db9438a8d9a86f86d29d9c563c00.pdf"
+        thesis: "Language modeling is a probability objective implemented through a structured tensor program."
+      - number: 3
+        slug: "03-tokenization-context-decoding"
+        title: "Tokenization, Context, and Decoding"
+        primary_sources:
+          - "llmsys-08-tokenization-594dd043d7a87d8dcc91b7e7585a0e34.pdf"
+          - "llmsys-09-decoding-cac2cd9402765ff5e6c24f7baffd321c.pdf"
+        thesis: "The interface between text and tokens shapes quality, latency, memory, and controllability."
+  - title: "Part II — Single-Device Computation"
+    chapters:
+      - number: 4
+        slug: "04-gpu-programming-model"
+        title: "Inside the GPU Programming Model"
+        primary_sources:
+          - "llmsys-02-gpu-programming-c64a0141b96a1f384db7f6717ed8e039.pdf"
+          - "llmsys-03-gpu-programming2-b82b6ffdf554494747d00ce7ac606c3b.pdf"
+        thesis: "GPU performance comes from exposing parallelism while respecting memory hierarchy and execution constraints."
+      - number: 5
+        slug: "05-kernels-memory-transformer-blocks"
+        title: "Kernels, Memory, and Transformer Blocks"
+        primary_sources:
+          - "llmsys-04-gpu-acceleration-48ffa5768ba62c54138f0a71ca2b68b8.pdf"
+          - "llmsys-10-transformer-acc-5ba466406bf7296f86cd244ad0405867.pdf"
+        thesis: "Transformer performance is often limited by memory movement as much as arithmetic."
+      - number: 6
+        slug: "06-flashattention-transformer-acceleration"
+        title: "FlashAttention and Attention Acceleration"
+        primary_sources:
+          - "llmsys-21-FlashAttention_tridao2026.4-50476379a6127697ae7fbf974ad28348.pdf"
+        thesis: "Attention acceleration is a case study in algorithm and hardware co-design."
+  - title: "Part III — Training Systems"
+    chapters:
+      - number: 7
+        slug: "07-dl-frameworks-and-compilers"
+        title: "Deep Learning Frameworks, JAX, XLA, and TPU"
+        primary_sources:
+          - "llmsys-05-dlframework-fa0770d636572de3f7b48ccae0ba8848.pdf"
+          - "llmsys-12-Introduction_to_JAX_XLA_TPU-f0450caf9e7e6707c009f7f77997a2be.pdf"
+          - "llmsys-13-pallas_splash_attention_srinath_mandalapu-b0bc7990950b84561ff9aa8e1791f727.pdf"
+        thesis: "Frameworks and compilers decide which model ideas can be expressed, optimized, and scaled."
+      - number: 8
+        slug: "08-distributed-training-ddp"
+        title: "Distributed Training and Data Parallelism"
+        primary_sources:
+          - "llmsys-14-distributed-training-b27c3d1dc185e680c6f5cc924e9ec9d7.pdf"
+          - "llmsys-15-ddp-165dbe3873fac21eb8b339e64bcfee28.pdf"
+        thesis: "Data parallelism scales training only when communication, synchronization, and overlap are engineered."
+      - number: 9
+        slug: "09-model-parallelism"
+        title: "Model Parallelism"
+        primary_sources:
+          - "llmsys-16-model-parallel-83b41612547620ee0e172caa1ee448ed.pdf"
+        thesis: "When a model no longer fits on one device, partitioning becomes part of the algorithm."
+      - number: 10
+        slug: "10-zero-moe-and-memory"
+        title: "ZeRO, MoE, and Training Memory"
+        primary_sources:
+          - "llmsys-17-MoE-3aa3125f9ccdd4bb7109ef077fbe9260.pdf"
+          - "llmsys-18-zero-20eb6c8d8c1e7092e1b922abf03d8cdd.pdf"
+        thesis: "Large-scale training is a memory accounting problem as much as a compute problem."
+  - title: "Part IV — Adaptation and Compression"
+    chapters:
+      - number: 11
+        slug: "11-quantization-and-peft"
+        title: "Quantization and Parameter-Efficient Adaptation"
+        primary_sources:
+          - "llmsys-19-quantization-da7a2abad092c802b03672ce1cc7bee9.pdf"
+          - "llmsys-20-quantization2-ba573d7e5d82e68027bbd3a92c3cd819.pdf"
+          - "llmsys-23-peft-791e97c5520e2ea7491153b45a923ac7.pdf"
+        thesis: "Compression and adaptation trade accuracy, memory, throughput, and deployment flexibility."
+  - title: "Part V — Inference and Serving"
+    chapters:
+      - number: 12
+        slug: "12-inference-cost-model"
+        title: "The Cost Model of LLM Inference"
+        primary_sources:
+          - "llmsys-22-llm-serving-scheduler-radixattention-dfa87a4515092525676277a85bc4425d.pdf"
+          - "llmsys-30-serving-c4a70ab21cde01fb60068a256c6e163a.pdf"
+        thesis: "Inference cost is shaped by prefill, decode, batching, memory bandwidth, and user-facing latency."
+      - number: 13
+        slug: "13-kv-cache-vllm-pagedattention"
+        title: "KV Cache, PagedAttention, and vLLM"
+        primary_sources:
+          - "llmsys-24-vLLM_woosuk_kwon-b6a0750bb310949461ba5a635a1126eb.pdf"
+        thesis: "Serving throughput depends on managing KV cache as a first-class memory system."
+      - number: 14
+        slug: "14-serving-scheduling-and-disaggregation"
+        title: "Scheduling, Caching, and Disaggregated Serving"
+        primary_sources:
+          - "llmsys-26-dynamo-vikram_mailthody-0ddbeb69382d5c168b6d4636a82185d0.pdf"
+          - "llmsys-27-LMCache_junchenjiang-c21828fe582270cb5e08b4a21a002956.pdf"
+          - "llmsys-28-mooncake-kTransformer-1243bfbecbb0c3610bf95eac030acb2a.pdf"
+          - "llmsys-29-disaggregating_prefill_decode_hao_zhang-c0e55139d20512a2348783423397cc7f.pdf"
+        thesis: "Modern serving systems split, schedule, and cache work across heterogeneous bottlenecks."
+  - title: "Part VI — System Design Synthesis"
+    chapters:
+      - number: 15
+        slug: "15-llm-system-codesign"
+        title: "Model-Algorithm-System Co-Design"
+        primary_sources:
+          - "llmsys-01-intro-14e74a426e4a7e3ed485a026e1f65b70.pdf"
+        thesis: "The durable skill is not memorizing systems, but reasoning across model architecture, algorithm, software, and hardware."
+

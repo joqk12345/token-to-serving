@@ -1,0 +1,486 @@
+System for MOE Models
+
+         Lei Li
+                           Outline
+• Transformer Mixture-of-Expert Model
+  o Switch Transformer architecture
+  o Shared-routed Experts
+
+• Training and inference for MoE
+  o Expert parallelism (GShard)
+
+• Deepseek MoE (V3 model)
+  o code walkthrough
+
+                                        2
+Motivation: Scaling for Dense model is hard
+
+ • Background: Compute is the primary challenge of training
+   massive models.
+
+
+
+
+   Sparse model is a promising path for improved model quality
+   without increasing training cost, e.g. MOE
+                                                                 3
+             Need for Sparse Model
+• Dense model is hard to scale, while sparse model scales to
+  larger models
+
+• Mixture-of-Expert is one type of sparse model
+  o pretraining is much faster vs. dense models
+  o MOE is faster in inference compared to a model with the same
+    number of parameters
+
+
+
+
+                                                                   4
+  Transformer Mixture of Expert Model
+
+• Replacing Transformer’s FFN with
+  o multiple small experts, each expert is a neural network (e.g.
+    FFNs)
+  o a gating network to choose which expert to activate based on
+    input token
+
+• Not to be confused with Mixture-of-Expert learning, which
+  is a learning algorithm to learn the weighted average of
+  predictor models
+                                                                    5
+ Transformer MoE (Switch Transformer)
+one token is only passed through one selected FFN
+
+
+
+
+                                                                                                                         6
+ Fedus et al. Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity. JMLR 2022.
+  Transformer MoE (Switch Transformer)
+• Gating network (G) learns which experts (E) to send a part
+  of the input:
+
+
+
+
+ Top-k gating:
+
+
+
+
+                                                                                                                          7
+  Fedus et al. Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity. JMLR 2022.
+                      Shared vs. Routed Experts
+                                                                                     Shared expert:
+                                                                                     calculating common
+                                                  ⨁                                  knowledge
+always                                                     ⨂                         Routed experts: calculated
+pass              Expert FFN          Expert    Expert    Expert    Expert
+                                                                                     token-specific knowledge.
+through
+                   (shared)             1         2         3         N
+                                                                                     First from Deepspeed-
+one                                                                                  MoE. later in deepseek
+                                                                   Router
+fixed                                               h                                MoE
+expert                               Multihead Attention
+
+FFN                                                                                     Softmax TopK ℎ𝑡 ⋅ 𝑊
+                                                                                                                                      8
+    Rajbhandari et al (2022). DeepSpeed-MoE: Advancing Mixture-of-Experts Inference and Training to Power Next-Generation AI Scale.
+Activated Experts Differ across layers
+
+      Expert   Expert   Expert   Expert   Expert   Expert   Expert   Expert
+        1        2        3        N        1        2        3        N
+
+
+
+
+                 Attention                           Attention
+
+
+
+      Expert   Expert   Expert   Expert   Expert   Expert   Expert   Expert
+        1        2        3        N        1        2        3        N
+
+
+
+
+                 Attention                           Attention
+
+
+
+               “red”                               “fox”                      9
+                 Parameters of MoE
+• How many parameters in Mixtral 8x7B model?
+
+• 56B?
+
+• 47B!
+  o since only FFN layers act are experts, the other parameters
+    (attention, embedding) are shared
+
+
+
+
+                                                                  10
+Danger of MoE over-fitting to small data
+
+
+
+
+                                           11
+      What does an Expert network learn?
+• Encoder experts tend to specialize in
+  token groups or shallow concepts
+  (e.g., punctuation, proper nouns).
+
+• Decoder experts exhibit less
+  specialization.
+
+• In multilingual setups, experts do not
+  specialize in specific languages due
+  to token routing and load balancing.
+                                           12
+Geometric Interpretation of Expert Routing
+ • KeepTop1 with 3 routing experts (finding linear boundaries
+   among expert centroids)
+
+
+
+
+                                                                13
+                           Outline
+• Transformer Mixture-of-Expert Model
+  o Switch Transformer architecture
+  o Shared-routed Experts
+
+• Training and inference for MoE
+  o Expert parallelism (GShard)
+
+• Deepseek MoE (V3 model)
+  o code walkthrough
+
+                                        14
+               Training of MoE: Expert Parallelism
+   • Keep one Expert on one
+     worker device
+
+   • Replicate all other network
+     components in all devices
+
+   • Need fast all-to-all
+     communication
+
+
+Lepikhin et al. GShard: Scaling Giant Models with Conditional
+                                                                15
+Computation and Automatic Sharding. ICLR 2021.
+             Training MoE: Expert Parallelism
+                 GPU1             GPU2          GPU3          GPU4
+
+
+   all-to-all
+   original dev     4
+ Split
+ across               Expert 1       Expert 2      Expert 3      Expert 4
+                  3    FFN            FFN           FFN           FFN
+ device
+       all-to-all   2
+       dispatch
+                1      Router        Router        Router        Router
+
+Replicate             Attention     Attention     Attention     Attention
+across
+device                Embedding     Embedding     Embedding     Embedding   16
+    Token Computation Path in MoE
+  GPU1           Expert 1
+                  FFN
+                                GPU2            Expert 2
+                                                 FFN
+   layer 2                        layer 2
+   KV-caches                      KV-caches
+                Router                         Router
+
+
+                Attention                      Attention
+
+                 Expert 1                       Expert 2
+   layer 1        FFN             layer 1        FFN
+
+   KV-caches                      KV-caches
+                Router                         Router
+
+               Attention                      Attention
+
+               Embedding                      Embedding
+
+batch1: red fox sits        batch2: the weather is         17
+        Gshard’s Interleaving Expert
+• For every other layer, use MoE
+
+
+
+
+                                       18
+          Load Balancing in MoE Training
+• Expert-Level Balance Loss (to avoid routing collapse to experts)
+                                                 #experts
+
+                                𝐿𝐸𝑥𝑝𝐵𝑎𝑙 = 𝛼1 𝑀     ෍        𝑓𝑖 𝑃𝑖
+                                                   𝑖=1
+          #tokens to expert 𝑖                      1
+   𝑓𝑖 =                                 𝑃𝑖 =             σ#tokens
+                                                          𝑡=1     𝑠𝑖,𝑡
+               #tokens                         #tokens
+   M: num of experts
+                                                                     routing weight
+
+
+
+
+                                                                                      19
+                   MOE Inference
+• MoE inference performance depends on:
+  o overall model size
+  o how many activated experts
+  o overall memory bandwidth
+
+• Default implementation:
+  o Keep all experts in GPU memory (need large mem)
+
+
+
+
+                                                      21
+            Optimizing MoE inference
+• System Design Goal: minimize the critical data path per device,
+  maximize the achievable aggregate memory bandwidth
+
+• group and route all tokens with the same critical data path together
+  to reduce data access per device and achieve maximum aggregate
+  bandwidth;
+
+• Optimize communication scheduling with parallelism coordination
+
+• Optimize transformer and MoE related kernels to improve per-device
+  performance
+                                                                         22
+          Expert Parallelism and Tensor-Parallelism
+
+                                                                              Expert Parallelism / Expert slicing
+                                                                              Group all input tokens assigned to the same
+                                                                              experts under the same critical data path, and
+                                                                              parallelize processing of the token groups with
+                                                                              different critical paths among different devices
+                                                                              using expert parallelism.
+
+                                                                              Tensor Parallelism / Tensor slicing:
+                                                                              Partition the non-expert parameters (Attention)
+                                                                              across devices (usually within a node)
+
+                                                                              Further with Data parallelism
+
+
+
+
+Rajbhandari et al (2022). DeepSpeed-MoE: Advancing Mixture-of-Experts Inference and Training to Power Next-Generation AI Scale.   23
+             Optimizing MoE Kernels
+
+• MOE Specific Optimizations:
+  o fuse the gating function into a single kernel
+  o dense token-to-expert mapping table
+
+• Result: over 6x reduction in MoE Kernel related latency
+
+
+
+
+                                                            24
+           Opportunity for Optimized All-to-All
+                   Communication
+   • Expert parallelism requires all-to-all communication
+     between all expert parallel devices; the latency increases
+     linearly with the increase in devices
+   • Optimization:
+        - hierarchical all-to-all communication pattern: reduces the
+          communication hops
+        - parallelism-coordinated communication optimization: schedules
+          communications based on the model's parallelism strategy to
+          minimize overhead.
+
+Rajbhandari et al (2022). DeepSpeed-MoE: Advancing Mixture-of-Experts Inference and Training to Power Next-Generation AI Scale.   25
+              MOE Training Loss and Throughput
+
+   Token-wise validation loss curves for dense and MoE LLMs
+
+
+
+
+                                                                        Training throughput (on 128
+                                                                        A100 GPUs) comparing MoE
+                                                                        based model vs dense model
+                                                                        that can both achieve the
+                                                                        same model quality.
+Rajbhandari et al (2022). DeepSpeed-MoE: Advancing Mixture-of-Experts Inference and Training to Power Next-Generation AI Scale.   26
+ DeepSpeed MOE Inference Performance
+
+
+
+
+Rajbhandari et al (2022). DeepSpeed-MoE: Advancing Mixture-of-Experts Inference and Training to Power Next-Generation AI Scale.   27
+                           Outline
+• Transformer Mixture-of-Expert Model
+  o Switch Transformer architecture
+  o Shared-routed Experts
+
+• Training and inference for MoE
+  o Expert parallelism (GShard)
+
+• Deepseek MoE (V3 model)
+  o code walkthrough
+
+                                        28
+ DeepSeek MoE
+• Fine-grained experts: each
+  FFN is split to k smaller
+  experts, total kN (N=original
+  experts)
+
+• shared experts + routing
+  experts
+
+• topk weighted average of
+  routing experts (activating     Softmax(h*e)
+  kM)
+                                                 30
+                   DeepSeek V3 MoE (670B)
+Vocab: 129,280
+dimension=7168
+num layer=61
+num dense layer=3 (lowest)                                      ⨁
+num head = 128
+                                                                        ⨂                 ⨂                           ⨂
+dim ffn (inter dim)=18432
+moe dim = 2048                         Expert FFN
+                                        (shared)
+                                                      Expert
+                                                        1
+                                                               Expert
+                                                                 2
+                                                                        Expert
+                                                                          3
+                                                                                 Expert
+                                                                                   4
+                                                                                          Expert
+                                                                                            5
+                                                                                                   Expert
+                                                                                                     6
+                                                                                                            Expert
+                                                                                                              7
+                                                                                                                      Expert
+                                                                                                                       256
+
+num shared experts = 1
+num routed experts = 256                                                                    Router
+                                                                                                                     k=8
+num activated experts = 8                                        h
+num expert group=8                                  Multihead Attention (MLA)
+num limited group=4
+ FFN𝑆𝑤𝑖𝐺𝐿𝑈 𝑥 = 𝑆𝑤𝑖𝑠ℎ 𝑥 ⋅ 𝑊1 ⨀ 𝑥 ∙ 𝑊2                 ⋅ 𝑊3                          TopK Softmax ℎ𝑡 ⋅ 𝑊 , 8
+                                                                                                                         32
+    https://github.com/deepseek-ai/DeepSeek-V3/blob/main/inference/model.py
+     Load Balancing in Deepseek MoE
+• Expert-Level Balance Loss (to avoid routing collapse to experts)
+                                                     #experts
+
+                                     𝐿𝐸𝑥𝑝𝐵𝑎𝑙 = 𝛼1        ෍      𝑓𝑖 𝑃𝑖
+                                                         𝑖=1
+              #experts             #tokens to expert 𝑖                           1
+   𝑓𝑖 =                        ∙                                        𝑃𝑖 =             σ#tokens
+                                                                                          𝑡=1     𝑠𝑖,𝑡
+          #activated_experts            #tokens                                #tokens
+
+
+• Device-level balance loss (balance computation across dev)
+                                                     #groups
+                                                                                         routing weight
+                                     𝐿𝐷𝑒𝑣𝐵𝑎𝑙 = 𝛼2        ෍ 𝑓𝑗 𝑃𝑗
+                                                         𝑗=1
+   𝑓𝑗 = 𝑎𝑣𝑔 𝑓 𝑖𝑛 𝑔𝑟𝑜𝑢𝑝 𝑗)                                  𝑃𝑗 = 𝑠𝑢𝑚 𝑜𝑓 𝑃 𝑖𝑛 𝑔𝑟𝑜𝑢𝑝 𝑗
+
+                                                                                                          33
+Deepseek Libraries to Accelerate MOE
+• DeepEP is a communication library tailored for Mixture-of-
+  Experts (MoE) and expert parallelism (EP).
+  o https://github.com/deepseek-ai/DeepEP
+
+• Expert Parallelism Load Balancer (EPLB)
+  o https://github.com/deepseek-ai/EPLB
+
+
+
+
+                                                               34
+ Deepseek V3 MoE Code Walkthrough
+• https://github.com/deepseek-ai/DeepSeek-
+  V3/blob/main/inference/model.py
+
+
+
+
+                                             35
+Deepspeed MoE Code Example
+
+
+
+
+   https://www.deepspeed.ai/tutorials/mixture-of-experts/
+                                                            36
+Deepspeed MoE Code Example
+
+
+
+
+ https://github.com/microsoft/DeepSpeed/blob/master/deepspeed/moe/layer.py   37
+Deepspeed MoE Code Example
+
+
+
+
+  https://github.com/microsoft/DeepSpeed/blob/master/deepspeed/moe/layer.py
+                                                                              38
+Deepspeed MoE Code Example
+
+
+
+
+                                                                               39
+ https://github.com/microsoft/DeepSpeed/blob/master/deepspeed/moe/experts.py
+                               Summary
+• LLM Mixture-of-Expert Model
+   o Instead of a single dense FFN, using multiple FFNs (experts)
+   o Routing network to select one/multiple experts
+   o Shared-routed experts (deepspeed-MOE, deepseek MOE)
+   o a few dense layers, then MOE (deepseek MOE)
+
+• Scalable training/inference
+   o expert parallelism: split experts and replicate non-expert (GShard)
+   o all-to-all communication for expert output
+   o load balancing: grouping and avoid collapse (deepseek)
+   o optimized kernel for MoE
+                                                                           40
+                      Reference
+
+• Rajbhandari et al (2022). DeepSpeed-MoE: Advancing
+  Mixture-of-Experts Inference and Training to Power Next-
+  Generation AI Scale.
+
+• Dai, D. et al. (2024). DeepSeekMoE: Towards Ultimate
+  Expert Specialization in Mixture-of-Experts Language
+  Models.
+
+
+                                                             41
+

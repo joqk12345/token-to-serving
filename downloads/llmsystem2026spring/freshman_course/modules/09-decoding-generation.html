@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>生成与解码策略 | LLM 系统新生导学</title>
+  <style>
+  :root { --ink:#172033; --muted:#607089; --line:#d8e0ec; --bg:#f6f8fb; --panel:#fff; --blue:#2563eb; --green:#15803d; --amber:#b45309; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif; background: var(--bg); color: var(--ink); letter-spacing: 0; }
+  main { max-width: 920px; margin: 0 auto; padding: 28px 18px 48px; }
+  header, section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 22px; margin-bottom: 14px; box-shadow: 0 10px 28px rgba(23,32,51,.07); }
+  a { color: var(--blue); text-decoration: none; } a:hover { text-decoration: underline; }
+  .back { display: inline-flex; margin-bottom: 12px; font-weight: 700; }
+  h1 { margin: 0 0 8px; font-size: clamp(28px, 4vw, 42px); line-height: 1.08; }
+  h2 { margin: 0 0 12px; font-size: 21px; }
+  p, li { line-height: 1.8; font-size: 16px; }
+  .meta { color: var(--muted); margin: 0; }
+  .tag { display:inline-flex; border-radius:999px; padding:4px 10px; background:#eaf1ff; color:#1d4ed8; font-weight:700; font-size:13px; margin-right:8px; }
+  .grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:14px; }
+  .callout { border-left: 4px solid var(--green); background:#e9f7ef; padding:12px 14px; border-radius:8px; }
+  .questions li::marker { color: var(--amber); font-weight: 800; }
+  @media (max-width: 760px) { .grid { grid-template-columns:1fr; } header, section { padding:18px; } }
+</style>
+</head>
+<body>
+  <main>
+    <a class="back" href="../index.html">返回互动课堂</a>
+    <header>
+      <span class="tag">从 Token 到 Transformer</span>
+      <h1>生成与解码策略</h1>
+      <p class="meta">这是一篇面向大学新生的导学文档，根据课程课件重新组织。原始 PDF 仍保留在文末，供深入阅读。</p>
+    </header>
+    <section>
+      <h2>学习目标</h2>
+      <ul><li>理解逐 token 生成</li><li>认识 greedy、beam search 和 sampling</li><li>知道解码会影响质量和速度</li></ul>
+    </section>
+    <section>
+      <h2>核心解释</h2>
+      <p>LLM 生成回答时通常一次预测一个 token，再把新 token 接回上下文继续预测。</p><p>greedy 选择最可能 token，sampling 引入随机性，beam search 保留多个候选路径。</p><p>解码策略影响回答多样性、稳定性、延迟和计算量。服务系统必须在质量和成本之间权衡。</p>
+    </section>
+    <section>
+      <h2>课堂例子</h2>
+      <p class="callout">写作文时每次只选最常见的下一个词，文章可能稳但无聊；允许多个候选，表达会更丰富但也更难控制。</p>
+    </section>
+    <section>
+      <h2>检查问题</h2>
+      <ol class="questions"><li>为什么生成是一轮一轮进行的？</li><li>temperature 调高可能带来什么效果？</li></ol>
+    </section>
+    <section>
+      <h2>原始资料</h2>
+      <p><a href="../../source_pdfs/llmsys-09-decoding-cac2cd9402765ff5e6c24f7baffd321c.pdf" target="_blank" rel="noopener">打开原始课件 PDF</a></p>
+    </section>
+  </main>
+</body>
+</html>

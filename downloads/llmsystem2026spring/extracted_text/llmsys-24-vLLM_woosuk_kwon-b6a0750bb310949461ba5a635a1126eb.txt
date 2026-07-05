@@ -1,0 +1,1353 @@
+Paged Attention & vLLM for
+Efficient LLM Inference Engine
+Woosuk Kwon, Inferact
+Topics
+●   Paged Attention: Efficient memory management for KV cache
+
+
+●   vLLM A real-world open-source inference engine
+
+
+●   Q&A
+
+
+
+
+                                                                2
+LLM inference is slow and expensive
+●   LLMs typically run on high-end GPUs (e.g., NVIDIA H100
+●   Yet, each GPU can only serve a handful of QPS; even simple queries
+    (with reasoning) can take minutes
+
+
+
+
+                                                                         3
+LLM inference is slow and expensive
+●   LLMs typically run on high-end GPUs (e.g., NVIDIA H100
+●   Yet, each GPU can only serve a handful of QPS; even simple queries
+    (with reasoning) can take minutes
+     ○   A major obstacle to broader adoption of AI
+
+●   The problem is getting harder due to the increasing scale:
+     ○   Larger model sizes
+     ○   Growing context lengths
+     ○   More tokens generated per query
+
+
+
+
+                                                                         4
+                                       LLM inference process
+                                                    the
+
+
+                     Layer N        Layer N      Layer N
+
+
+
+
+Transformer layers
+                     Layer N-1     Layer N-1     Layer N-1
+
+                      …              …            …
+                      Layer 1       Layer 1       Layer 1
+
+
+                       Emb           Emb           Emb
+
+
+                     Artiﬁcial    Intelligence      is
+
+
+                                 Input prompt                  5
+                                      LLM inference process
+                                                   the       future
+
+
+                     Layer N       Layer N      Layer N     Layer N
+
+
+
+
+Transformer layers
+                     Layer N-1    Layer N-1     Layer N-1   Layer N-1
+
+                      …             …            …           …
+                      Layer 1      Layer 1       Layer 1     Layer 1
+
+
+                       Emb          Emb           Emb         Emb
+
+
+                     Artiﬁcial   Intelligence      is          the
+
+
+                                                                        6
+                                    LLM inference process
+                                                the           future          of
+
+
+                     Layer N     Layer N      Layer N        Layer N        Layer N
+
+
+
+
+Transformer layers
+                     Layer N-1   Layer N-1   Layer N-1      Layer N-1      Layer N-1
+
+                      …           …           …               …             …          …
+
+                      Layer 1     Layer 1     Layer 1        Layer 1        Layer 1
+
+
+                       Emb         Emb         Emb            Emb            Emb
+                       Repeat until
+                        ● Reaches maximum length (e.g., 1M tokens)
+                     Artiﬁcial Intelligence   is              the          future
+                        ● Generate certain tokens (e.g., “<|end of sequence|>”)
+                        ● …
+                                                                                           7
+            Why is LLM inference inefficient?
+                             the       future         of
+
+
+
+
+ …               …           …         …            …        …
+
+
+
+
+Artiﬁcial     Intelligence   is         the         future
+
+
+    Sequential dependency → Hard for GPU parallelization         8
+                           Batching?
+ Better utilize             the         future       of
+
+ parallel hardware           a         computer   scientist
+
+
+
+
+ …             …            …           …          …          …
+
+
+
+
+Artiﬁcial   Intelligence     is          the       future
+  Alan        Turing         is           a       computer
+                                                                  9
+                                          Attention KV cache
+                                                        future
+
+
+
+
+Transformer layer i
+                       -0.1           0.3        0.5    -0.8
+                       0.3           -0.4        -0.9    0.1     Intermediate vector repr.
+                         …             …           …      …      (“Attention key & value”)
+                        1.2          -0.7         1.1    0.6
+
+                                  KV Cache
+
+                      Artiﬁcial   Intelligence    is     the
+
+
+                                                                                        10
+                                     Attention KV cache size
+                                                                        of
+
+
+
+
+Transformer layer i
+                       -0.1          0.3       0.5            -0.8     -0.8
+                       0.3          -0.4       -0.9            0.1      0.1
+                         …            …          …              …        …
+                        1.2         -0.7        1.1            0.6      0.6
+
+                                           KV Cache
+
+                      Artiﬁcial   KV   Cache is huge:
+                                   Intelligence   is           the     future
+                                   ● Each token: ~1 MB.
+                                   ● One full request: ~several GBs.            11
+                              Key insight
+
+Efficient management of KV cache is crucial for high-throughput LLM
+serving
+                                                            Previous systems          PagedAttention
+
+
+
+
+                               Memory usage (GB)
+                                                   40
+
+
+                KV Cache
+    Parameters (12GB, 30%)
+                                                   26
+   (26GB, 65%)
+                                                   Param.   8                              40
+                                                    size        Batch size (# requests)
+                     Others
+
+   13B LLM on A100-40GB*
+      *Common setup in 2023
+
+                                                                                                       12
+                              Key insight
+
+Efficient management of KV cache is crucial for high-throughput LLM
+serving
+                                                            Previous systems         PagedAttention
+
+
+
+
+                                  Memory usage (GB)
+                                                      40
+
+
+                KV Cache
+    Parameters (12GB, 30%)
+                                                      26
+   (26GB, 65%)
+
+                                                      3.2
+                              Throughput
+                     Others
+
+   13B LLM on A100-40GB*
+      *Common setup in 2023    (reqs/s)               0.8
+
+                                                            8                             40          13
+                                                                Batch size (# requests)
+                     Case for recent MoE models
+●   Recent MoE models have high sparsity
+     ○   DeepSeek V3: 32x (top k = 8, E = 256)
+     ○   Kimi K2: 48x (top k = 8, E = 384)
+
+
+
+●   This means, each expert only handles 1/32 – 1/48 tokens in the batch
+
+
+
+●   In other words, to saturate GPU compute, MoE models require 32x–48x
+    larger batch sizes than dense models
+     ○   The demand for KV cache space gets even more signiﬁcant
+
+
+
+
+                                                                           14
+           KV cache management in previous systems
+
+    0                              3                                 A’s max length
+                  Intellige
+     Artificial               is       <resv> <resv>   …     <resv> <resv>     …      …       Alan     Turing    …
+                    nce
+
+         3 KV Cache slots for           Pre-allocated slots for A’s output   External frag.          Request B
+          request A’s prompt                     (Internal frag.)
+
+
+●   Pre-allocates contiguous memory to the request’s maximum length
+     ○     Convention in previous deep learning workloads with static input/output shapes
+
+●   Results in memory fragmentation
+     ○     Internal fragmentation due to the unknown output length.
+     ○     External fragmentation due to non-uniform per-request max lengths.
+
+
+
+                                                                                                                     15
+          Signiﬁcant memory waste in KV cache space
+    Only 20–40% of KV Cache space is utilized to store actual token states
+
+
+
+
+                                                                                                    16
+Yu et al. “Orca: A Distributed Serving System for Transformer-Based Generative Models” (OSDI 22).
+                             PagedAttention
+          Application-level memory paging and virtualization
+                         for attention KV Cache
+
+Memory management in OS                          PagedAttention
+
+              Page 0                                KV Block 0
+Process       Page 1        Process    Request      KV Block 1    Request
+   A          Page 2           B          A         KV Block 2       B
+
+              Page 3                                KV Block 3
+              Page 4                                KV Block 4
+          Physical Memory                           KV Cache
+
+
+
+                                                                            17
+     Paging KV cache space into KV blocks
+ Contiguous KV Cache
+                  Intelli-
+      Artiﬁcial              is   the
+                  gence
+
+
+                                                             KV Blocks
+                                        block 0
+
+                                        block 1
+
+                                        block 2
+
+KV block: a ﬁxed-size block of          block 3
+
+memory that stores KV cache             block 4 Artiﬁcial Intelli-    is     the
+                                                            gence
+from left to right
+                                        block 5
+
+
+                                                            Block size = 4         18
+                                           Virtualizing KV Cache
+
+                                                                                                     Physical KV blocks
+                            Request                                                 block 0
+                              A
+                                                                                    block 1 computer scientist
+          Prompt: “Alan Turing is a computer scientist”
+                                                                                    block 2
+
+                       Logical KV blocks                                            block 3
+                                                             Block table
+              Alan      Turing        is       a             Physical
+block 0                                                                  # Filled   block 4
+                                                          block number
+                                                               7            4
+block 1 computer scientist                                                          block 5
+                                                               1            2
+block 2                                                        –            –       block 6
+                                                               –            –
+block 3                                                                             block 7   Alan     Turing    is       a
+
+
+                                                                                                                              19
+Attention mechanism with virtualized KV cache
+  1. Fetch non-contiguous KV blocks using the block table
+  2. Apply attention operation on the ﬂy
+
+
+
+
+          5-10% slowdown in GPU kernel latency
+               due to memory indirection
+
+
+                                                            20
+                 Paged Attention Pseudocode
+
+
+
+
+●   In practice, PagedAttention is implemented as a custom GPU kernel to
+    avoid materializing gathered keys and values
+●   Can be combined with FlashAttention
+                                                                           21
+              Memory management with PagedAttention
+
+                                                                                                 Physical KV blocks
+                         Request                                                block 0
+                           A
+                                                                                block 1 computer scientist
+      Prompt: “Alan Turing is a computer scientist”
+   Completion: “and”                                                            block 2
+
+                    Logical KV blocks                                           block 3
+                                                         Block table
+           Alan      Turing        is      a             Physical
+block 0                                                              # Filled   block 4
+                                                      block number
+                                                           7            4
+block 1 computer scientist                                                      block 5
+                                                           1            2
+block 2                                                    –            –       block 6
+                                                           –            –
+block 3                                                                         block 7   Alan     Turing    is       a
+
+
+                                                                                                                          22
+              Memory management with PagedAttention
+
+                                                                                                 Physical KV blocks
+                         Request                                                block 0
+                           A
+                                                                                block 1 computer scientist
+      Prompt: “Alan Turing is a computer scientist”
+   Completion: “and”                                                            block 2
+
+                    Logical KV blocks                                           block 3
+                                                         Block table
+           Alan      Turing        is      a             Physical
+block 0                                                              # Filled   block 4
+                                                      block number
+                                                           7            4
+block 1 computer scientist      and                                             block 5
+                                                           1            2
+block 2                                                    –            –       block 6
+                                                           –            –
+block 3                                                                         block 7   Alan     Turing    is       a
+
+
+                                                                                                                          23
+              Memory management with PagedAttention
+
+                                                                                                 Physical KV blocks
+                         Request                                                block 0
+                           A
+                                                                                block 1 computer scientist   and
+      Prompt: “Alan Turing is a computer scientist”
+   Completion: “and”                                                            block 2
+
+                    Logical KV blocks                                           block 3
+                                                         Block table
+           Alan      Turing        is      a             Physical
+block 0                                                              # Filled   block 4
+                                                      block number
+                                                           7            4
+block 1 computer scientist      and                                             block 5
+                                                           1            3
+block 2                                                    –            –       block 6
+                                                           –            –
+block 3                                                                         block 7   Alan     Turing    is       a
+
+
+                                                                                                                          24
+              Memory management with PagedAttention
+
+                                                                                                 Physical KV blocks
+                         Request                                                block 0
+                           A
+                                                                                                                   mathem
+                                                                                block 1 computer scientist   and
+                                                                                                                   atician
+      Prompt: “Alan Turing is a computer scientist”
+   Completion: “and mathematician”                                              block 2
+
+                    Logical KV blocks                                           block 3
+                                                         Block table
+           Alan      Turing        is      a             Physical
+block 0                                                              # Filled   block 4
+                                                      block number
+                                        mathema            7            4
+block 1 computer scientist      and                                             block 5
+                                         tician            1            4
+block 2                                                    –            –       block 6
+                                                           –            –
+block 3                                                                         block 7   Alan     Turing    is       a
+
+
+                                                                                                                          25
+              Memory management with PagedAttention
+
+                                                                                                 Physical KV blocks
+                         Request                                                block 0
+                           A
+                                                                                                                   mathem
+                                                                                block 1 computer scientist   and
+                                                                                                                   atician
+      Prompt: “Alan Turing is a computer scientist”
+   Completion: “and mathematician renowned”                                     block 2
+
+                    Logical KV blocks                                           block 3
+                                                         Block table
+                                                         Physical                            Allocated on demand
+block 0    Alan      Turing        is      a                         # Filled   block 4
+                                                      block number
+                                        mathema            7            4
+block 1 computer scientist      and                                             block 5 renowned
+                                         tician            1            4
+block 2 renowned                                           5            1       block 6
+                                                           –            –
+block 3                                                                         block 7   Alan     Turing    is       a
+
+
+                                                                                                                          26
+             Memory efficiency of PagedAttention
+
+●   Minimal internal fragmentation
+                                                          Alan       Turing     is       a
+     ○   Only happens at the last block of a sequence
+     ○   # wasted tokens/seq < block size               computer    scientist   and
+                                                                                      mathemati
+                                                                                        cian
+          ■ Sequence: ~1000 tokens                      renowned
+          ■ Block size: ~10 tokens
+●   No external fragmentation                                      Internal fragmentation
+
+
+
+
+                                                                   2.5-5x improvement
+
+
+
+                                                                                                  27
+                           Paging enables sharing
+
+Example: Parallel sampling                   that will shape the industry and
+                                             its impact on businesses and
+                                             individuals…
+
+
+ The future of cloud computing               each playing a pivotal role in
+ is likely to be characterized by   LLM      reshaping how businesses
+ several key trends                          leverage technology…
+          Shared btw. sequences
+                                             which will not only transform the
+                                             way organizations operate but
+           Prompt                            also empowering them…
+
+
+                                                     Multiple outputs
+
+                                                                                 28
+                                        Sharing KV blocks
+
+                                                Physical KV blocks
+              Sample                      key      trends
+                                                                                              Sample
+                A                                                                               B
+                                          The      future     of      cloud
+          Logical KV blocks                                                               Logical KV blocks
+
+ The       future    of       cloud                                              The       future    of       cloud
+comput-                                                                         comput-
+             is     likely      to       comput-                                             is     likely      to
+  ing                                                is      likely     to        ing
+          charac-                          ing                                            charac-
+  be                 by       several                                             be                 by       several
+          terized                                                                         terized
+ key       trends                                  charac-                       key       trends
+                                           be                 by      several
+                                                   terized
+
+
+
+                                                                                                                        29
+                                        Sharing KV blocks
+
+                                                   Physical KV blocks
+              Sample                        key      trends    each
+                                                                                              Sample
+                A                                                                               B
+                                             The     future     of      cloud
+          Logical KV blocks      Copy-on-Write                                            Logical KV blocks
+
+ The       future    of       cloud                                              The       future    of       cloud
+                                            key      trends    that
+comput-                                                                         comput-
+             is     likely      to         comput-                                           is     likely      to
+  ing                                                  is      likely    to       ing
+          charac-                            ing                                          charac-
+  be
+          terized
+                     by
+                         All prompt blocks (except the last)
+                              several                                             be
+                                                                                          terized
+                                                                                                     by       several
+
+ key       trends   that
+                              are shared
+                                    be    across
+                                       charac-
+                                               by  sampleskey trends
+                                                  several
+                                                                                                    each
+                                                     terized
+
+
+
+                                                                                                                        30
+                    More complex sharing: beam search
+
+
+                                            Shared btw. two beams       Beam 0
+                                                                                 created
+
+                                  famous    computer      scientist     who
+    Shared btw. three beams                                                        led
+                                                                        Beam 1
+Alan     Turing   is          a
+
+           Prompt                                                       Beam 2
+                                  British   mathemat        and       computer   scientist
+                                              ician
+
+
+
+
+●   Similar to process tree (fork & kill)
+●   Efficiently supported by paged attention and copy-on-write mechanism
+
+                                                                                             31
+            Memory saving via sharing
+
+
+
+
+Percentage = (#blocks saved by sharing) / (#total blocks without sharing)
+            OPT-13B on 1x A100-40G with ShareGPT dataset
+                                                                            32
+How does PagedAttention beneﬁt LLM Serving?
+
+
+
+
+   Reduce memory         Further reduce
+ fragmentation with     memory usage with
+       paging               sharing
+
+
+
+
+                                              33
+      Out of KV block memory
+
+
+                     Physical KV blocks
+
+            The        future      of       cloud
+Request
+   A                                       mathe-
+          computer    scientist   and
+                                           matician
+
+          computing      is       likely      to      Full
+
+          renowned
+Request
+   B
+            Alan       Turing       is        a
+
+
+
+
+                                                             34
+      Out of KV block memory
+
+                                                           Cannot allocate a
+                                                           new physical block
+                     Physical KV blocks
+                                                           for Request B
+            The        future      of       cloud
+Request
+   A                                       mathe-
+          computer    scientist   and
+                                           matician
+
+          computing      is       likely      to      be
+
+          renowned      for
+Request
+   B
+            Alan       Turing       is        a
+
+
+
+
+                                                                                35
+             Request preemption & recovery
+
+          Goal: Free some requests’ KV cache to let others run ﬁrst.
+
+
+     Option 1: Swapping                      Option 2: Recomputation
+
+
+Swap to                                  Delete
+CPU
+
+
+
+                           Swap back
+                           to GPU                                      Recompute
+
+                                                                                   36
+             Notes on preemption & recovery
+
+
+Swap/recompute the whole request, since all
+previous tokens are required every step.
+Swapping: smaller block sizes → higher
+overhead due to small data transfers.
+Recomputation: surprisingly fast since all
+token’s KV cache can be computed in parallel.     Figure: Swap/Recomputation
+                                                  latency of 256 tokens.
+
+
+             Our strategy: Use recomputation with FCFS policy
+
+                                                                               37
+ Comparison with operating system virtual memory
+
+
+           Analogies                           Differences
+
+OS pages ↔ KV blocks                Single-level block table
+ ● Reduce memory fragmentation       ● Block table is tiny compared to
+                                        the actual data.
+Shared pages across processes
+                                    Preemption & Recovery
+↔ Shared KV blocks across samples
+                                     ● Request-level preemption
+ ● Reduce memory waste via
+                                     ● Recomputation-based recovery
+   sharing
+
+
+
+                                                                         38
+            Throughput – greedy decoding
+
+
+
+
+         2.4x speedup
+
+
+
+
+                                             Average number of batched requests.
+
+OPT-13B on 1xA100 40G with ShareGPT trace.
+
+
+
+                                                                                   39
+                 Throughput – beam search
+
+
+
+
+No beam search      Beam width = 2           Beam width = 4   Beam width = 6
+ 1.8x speedup        2.4x speedup             3.2x speedup     3.5x speedup
+
+
+                   OPT-13B on 1xA100 40G with Alpaca trace.
+                        Speedup: vLLM v.s. Orca(Pow2)
+
+
+                                                                               40
+PagedAttention has become the industrial standard
+
+
+
+
+                                                   …
+
+
+
+
+  TensorRT-LLM   HuggingFace TGI    Fireworks AI
+                                                    41
+Topics
+●   Paged Attention: Efficient memory management for KV cache
+
+
+●   vLLM A real-world open-source inference engine
+
+
+●   Q&A
+
+
+
+
+                                                                42
+What is vLLM?
+●   vLLM is a popular open-source LLM inference engine to make inference
+    efficient and effortless
+●   vLLM is collaboratively developed by many organizations
+
+                                                                   76K★
+
+
+
+
+                                                                           43
+vLLM API 1 LLM Class
+
+   A Python interface for offline batched inference
+
+
+      from vllm import LLM
+
+      # Example prompts.
+      prompts = ["Hello, my name is", "The capital of France is"]
+      # Create an LLM with HF model name.
+      llm = LLM(model="Qwen/Qwen3-VL-8B-Instruct")
+      # Generate texts from the prompts.
+      outputs = llm.generate(prompts)
+
+
+                                                                    44
+vLLM API 2 OpenAI-compatible Server
+   A FastAPI-based server for online serving
+
+   Server
+  $ vllm serve Qwen/Qwen3-VL-8B-Instruct
+    Client
+
+  $ curl http://localhost:8000/v1/completions \
+      -H "Content-Type: application/json" \
+      -d '{
+          "model": "Qwen/Qwen3-VL-8B-Instruct",
+          "prompt": "San Francisco is a",
+          "max_tokens": 7,
+          "temperature": 0
+      }'
+                                                  45
+vLLM Overview
+
+
+
+
+                46
+How does vLLM optimize LLM inference?
+1.   Minimizing CPU overheads
+2.   Efficient GPU kernels
+3.   Model parallelisms
+4.   Efficient memory management & caching
+
+
+
+
+                                             47
+How does vLLM optimize LLM inference?
+1.   Minimizing CPU overheads
+2.   Efficient GPU kernels
+3.   Model parallelisms
+4.   Efficient memory management & caching
+
+
+
+
+                                             48
+Why does CPU Overhead matter in LLM inference?
+●   In LLM inference, each step is very fast; just 510 ms 100200 tok/s)
+     ○   c.f.) In training, each step is much slower; typically 100 ms - 1+ s
+
+
+
+●   This means even a small overhead matters
+     ○   Just 1 ms extra CPU overhead can cut performance by 20%
+
+
+
+●   Unfortunately, 1 ms overhead is pretty easy to hit in Python
+
+
+
+
+                                                                                49
+Minimizing CPU Overheads
+                ●   API Server: Rewrite Python to Rust
+
+
+
+                ●   Scheduler & KV Cache Manager
+                     ○ Async Scheduling
+                     ○ Async De-tokenization
+
+
+
+                ●   Worker
+                     ○ GPU-native Input Preparation
+                     ○ CUDA Graphs
+
+
+                                                         50
+Synchronous Scheduling
+
+            Schedule                                       Schedule
+            step N  1                                     step N  2
+    CPU
+                          Prepare                                        Prepare
+                         step N  1                                     step N  2
+
+
+    GPU                               Execute step N  1                             Execute step N  2
+
+                                                    Timeline
+
+
+●   Scheduling & input preparation happens on the critical path, making GPU idle
+
+
+
+
+                                                                                                          51
+Asynchronous Scheduling
+
+                     Schedule                          Schedule                       Schedule
+                     step N  1                        step N  2                     step N  3
+     CPU
+                                         Prepare                          Prepare                    Prepare
+                                        step N  1                       step N  2                 step N  3
+
+
+     GPU                    Execute step N                 Execute step N  1            Execute step N  2
+
+                                                                    Timeline
+
+●    vLLM overlaps the host overheads with model execution
+       ○    Core idea: “schedule & prepare the next batch one step aheadˮ
+●    vLLM ensures zero synchronization, so the GPU is never stalled by the CPU in
+     any cases
+
+                                                                                                                 52
+Zhu et al, “NanoFlow: Towards Optimal Large Language Model Serving Throughput“
+GPUNative Input Preparation
+
+  Input Preparation   ●   vLLM involves complex bookkeeping for batching,
+                          paged attention, and sampling parameters
+
+
+                      ●   Previously, this logic was implemented with many
+   Model Forward          small PyTorch ops, mostly executed on CPU, which
+                          is slow and complex
+
+
+                      ●   MRV2 replaces this with custom Triton kernels,
+ Output Processing        which is fast and clean
+  & State Update
+
+                                                                             53
+Async Scheduling + Spec Decoding
+
+                        Schedule                                     Schedule
+    CPU                                      Launch                                       Launch
+                                           prep kernels                                 prep kernels
+
+
+                                                  Rejection                                    Rejection
+    GPU          prep          Run model           sample
+                                                              prep          Run model           sample
+
+
+                                                          Timeline
+
+●   GPU-native input preparation naturally makes async scheduling and spec
+    decoding compatible
+     ○   The input preparation kernels can see the results of rejection sampling
+
+
+
+                                                                                                           54
+CUDA Graph for Minimizing CPU Overheads
+      Python/PyTorch overhead
+
+CPU      torch.nn.Linear         torch.nn.GELU      torch.nn.Linear
+
+                                matmul             gelu               matmul
+GPU                             kernel            kernel              kernel
+
+                                           Idle              Idle
+                                                                               Time
+       Python/PyTorch overhead takes up to 50% of overall latency
+        CUDA Graph
+
+CPU
+              matmul    gelu     matmul
+GPU           kernel   kernel    kernel
+
+                                                                               Time   55
+Full CUDA Graph
+   Q      K        V   ●   We can capture the entire model into a
+                           single CUDA graph
+        MLP 1
+
+
+                       ●   Pros: Minimal CPU overheads in model
+        MLP 0
+                           execution
+
+          O
+
+                       ●   Cons: Limited flexibility
+       Attention            ○   Static shapes are required
+                            ○   No CPU operations are allowed
+
+   Q      K        V       → Increased development burden
+                                                                    56
+Dynamisms in LLM Inference
+ ●     Dynamic scheduling
+         ○    The model needs to handle an arbitrary mix of prefills and decodes in the same batch
+
+ ●     Kernel heuristics
+         ○    E.g., Cascade Attention
+         ○    Rely on run-time heuristics that cannot be predetermined ahead of time
+
+ ●     CPU offloading
+         ○    Requires CPU operations during the model execution
+
+
+       With full CUDA graph, our options were either
+        ● Abandon CUDA graph and use PyTorch eager (sacrificing performance), or
+        ● Develop a special GPU kernel to work around the issue (sacrificing simplicity)
+
+
+
+Ye et al., “Cascade Inference: Memory Bandwidth Efficient Shared Prefix Batch Decodingˮ              57
+Our solution: Piecewise CUDA Graphs
+   Q      K        V
+
+
+        MLP 1
+                       Token-wise Operations
+                       Stateless & Easy to deal with)
+        MLP 0
+
+
+          O
+
+
+       Attention       Dynamic & Stateful & Complex
+
+
+   Q      K        V   Token-wise Operations
+                       Stateless & Easy to deal with)
+                                                         58
+Our solution: Piecewise CUDA Graphs
+   Q      K        V
+
+
+        MLP 1
+                       CUDA graph N
+        MLP 0
+
+                                        Graph split using
+          O                              torch.compile
+
+       Attention       PyTorch Eager
+
+   Q      K        V
+                       CUDA graph N1
+                                                            59
+Full vs. Piecewise CUDA graphs
+               Full CUDA graph
+
+CPU
+             matmul     gelu     matmul   (specialized)     matmul    gelu    matmul
+GPU          kernel    kernel    kernel   attn kernel       kernel   kernel   kernel
+
+                                                                                       Time
+
+
+      CUDA Graph N1   Pytorch Eager      CUDA Graph N
+
+CPU                      Attention
+
+             matmul     gelu     matmul   (off-the-shelf)   matmul    gelu    matmul
+GPU          kernel    kernel    kernel   attn kernel       kernel   kernel   kernel
+
+                                                                                       Time
+                                                                                              60
+Piecewise CUDA Graphs
+  Q      K        V   ●   Split the model into pieces
+                           ○   Runs the attention op in eager-mode PyTorch
+                           ○   Runs other ops with CUDA graphs
+       MLP 1
+
+                      ●   Pros: High flexibility in implementing the
+       MLP 0
+                          attention op
+                           ○   No restriction on shapes
+         O                 ○   Any CPU operations are allowed at runtime
+
+
+                      ●   Cons: CPU overheads in the attention op could
+      Attention
+                          potentially be a performance bottleneck
+
+  Q      K        V
+
+                                                                             61
+Performance: Full vs. Piecewise CUDA Graphs
+
+
+
+
+●   639% faster than PyTorch eager
+●   27% slower than full CUDA graph (in the worst case)
+     ○   02% slower than full CUDA graph for batch size >= 8
+                            *Input len: 4K, Output len: 50, Batch size: 1, H100 GPU   62
+How does vLLM optimize LLM inference?
+1.   Minimizing CPU overheads
+2.   Efficient GPU kernels
+3.   Model parallelisms
+4.   Efficient memory management & caching
+
+
+
+
+                                             63
+GPU Kernels in vLLM
+●   For complex or performance-critical kernels, vLLM leverages FlashInfer
+    or other libraries
+     ○   vLLM provides AttentionBackend and FusedMoE abstractions to plug in different
+         kernel implementations
+
+
+
+
+●   For memory-bound kernels (e.g., RMS norm, RoPE, vLLM either
+     ○   Uses torch.compile to automatically fuse and generate kernels
+     ○   Or, manually implements fused kernels
+
+
+
+
+                                                                                         64
+Example: DeepSeek V3.2
+
+
+
+
+                         65
+Example: DeepSeek V3.2
+
+
+
+
+                         66
+Example: DeepSeek V3.2 (fused)
+
+
+
+
+                                 67
+How does vLLM optimize LLM inference?
+1.   Minimizing CPU overheads
+2.   Efficient GPU kernels
+3.   Model parallelisms
+4.   Efficient memory management & caching
+
+
+
+
+                                             68
+Why do we need model parallelism?
+●   Models are getting bigger
+     ○   Kimi K 2.5 has 1 T parameters 600 GB after quantization)
+     ○   B200 GPU 285 GB HBM
+     ○   Memory is not only used for parameters. Activations and KV cache also takes memory.
+
+
+
+●   Use more GPUs to multiple the FLOPS and bandwidth
+     ○   Reduce serving latency
+     ○   Increase serving throughput
+
+
+
+
+                                                                                               69
+Things to consider for parallelism
+ ●   Theoretically, all tensors can be arbitrarily distributed and all dimensions of
+     all tensors can be sharded.
+ ●   Goal 1: Minimize communication overhead
+      ○ Limit the number of bytes transferred
+      ○ Hide the overhead via overlapping with computation
+      ○ Network is also heterogeneous
+            ■ Latest NVLink: 1.8TB/s
+            ■ Infiniband: 50GB/s
+ ●   Goal 2: Minimize load imbalance
+      ○ A system is often bottlenecked by the slowest component
+
+
+                                                                                       70
+Data parallelism
+
+  ●   Replicated engines
+  ●   A load-balancer routes different requests to
+                                                                Engine 1
+      different engines based on
+       ○   Engine load                               Requests
+       ○   KV cache memory usage
+       ○   (Prefix) Caching                                     Engine 2
+
+ 👍    No communication between engines
+ 👎    No parameter memory saving
+ 👎    No reduction in latency
+
+
+                                                                           71
+Tensor parallelism
+
+   ●        Partition the weights in the linear
+            layers
+ 👍          Reduce the serving latency if the
+            network is fast
+ 👍          KV Cache can also be partitioned
+ 👎          Heavy communication. Often require
+            NVLink to work effectively.
+ 👎          Limited by the number of KV heads
+
+
+ Image source: https://www.titanml.co/resources/harmonizing-multi-gpus-efficient-scaling-of-llm-inference
+                                                                                                            72
+Expert parallelism
+
+
+   ●        Distribute different experts to
+            different nodes
+👍           Friendly for GPU kernels
+👍           Smaller communication than TP
+👎           Only apply for MoE layers. Attention
+            needs other parallelism (e.g., DP.
+👎           Load imbalance
+
+
+
+ Image source: https://research.google/blog/mixture-of-experts-with-expert-choice-routing/
+                                                                                             73
+Context parallelism
+ ●       Extension of DP to subsequences of a
+         single long sequence
+ ●       Communicate Qs or KVs across
+         different shards
+👍        Parallelize the sequence dimension
+         for very long sequences. Balance the
+         KV Cache across shards
+👎        No parameter memory saving
+👎        For sampling one request, only one
+         GPU will be running. Require
+         balancing requests loads.
+ Image source: https://coconut-mode.com/posts/ring-attention/
+                                                                74
+Pipeline parallelism
+                                                            Output
+
+ ●   Distribute the layers to different GPUs
+                                               Device N     Layer N
+     and pipeline the execution across
+     devices                                   Device N-1   Layer N-1
+👍    Lowest communication overhead                             …
+👎    Increased latency
+👎    Load imbalance between stages             Device 2      Layer 2
+
+
+                                               Device 1      Layer 1
+
+
+                                                             Input
+
+
+
+                                                                        75
+Prefill Disaggregation PD
+
+               Routing Layer                    ●   Why PD?
+                                                    ○   More controllable TTFT & TPOT
+                                                    ○   Optimize prefill & decode independently
+                                                ●   Routing backends
+                                                    ○   vLLM Router, NVIDIA Dynamo, llm-d, Ray
+ Engine                          Engine
+  Engine                          Engine                Serve LLM
+    Engine        KV Cache          Engine
+      Engine                          Engine    ●   NIXL for KV cache transfer
+
+Prefill Workers                Decode Workers
+
+
+
+                                                                                             76
+Mixed Parallelism
+
+
+
+
+                    77
+Case Study: Kimi K2.5 (NVFP4)
+
+
+
+
+     High Throughput
+    P: 10xDEP 4 GPUs                                  Low Latency
+    D: 1xDEP 24 GPUs                                 Non-PD, TEP 4
+
+
+
+
+                       8K input & 1K output, GB200
+                                                                     78
+How does vLLM optimize LLM inference?
+1.   Minimizing CPU overheads
+2.   Efficient GPU kernels
+3.   Model parallelisms
+4.   Efficient memory management & caching
+
+
+
+
+                                             79
+Hybrid Memory Allocator
+                                              ●   Modern LLMs use hybrid
+      Full Attention        Gated DeltaNet
+                                                  architecture (full attention + X) for
+                                                  efficient long context support
+ Sliding Window Attention   Gated DeltaNet
+
+
+      Full Attention         Full Attention   ●   How to manage the KV cache for the
+                                                  hybrid models?
+ Sliding Window Attention   Gated DeltaNet         ○ A straightforward solution is
+                                                       static partitioning
+      Full Attention        Gated DeltaNet         ○ However, it could cause severe
+                                                       memory fragmentation
+ Sliding Window Attention   Gated DeltaNet
+
+
+      GPTOSS               Qwen 3.5
+                                                                                          80
+Hybrid Memory Allocator (contʼd)
+
+         Full Attention Allocator                            Gated DeltaNet Allocator
+
+
+               “Allocate 1024 tokensˮ                         “Allocate a sequenceˮ
+
+
+                                        Shared Memory Pool
+                                           for KV Cache
+
+
+●   vLLM uses dynamic partitioning to flexibly utilize all available memory
+●   vLLM adjusts the allocation granularity (“block sizesˮ) to minimize
+    memory fragmentation
+●   012% memory waste for all OSS models
+
+                                                                                        81
+Summary
+●   vLLM provides a clean core that modularizes models and enables
+    various features with zero CPU overhead
+●   vLLM provides full-stack performance optimizations for state-of-the-art
+    models from kernels to model parallelisms
+
+        vllm.ai
+
+        slack.vllm.ai
+
+        x.com/vllm_project
+
+        inferact.ai
+                                                                              82
+

@@ -1,0 +1,687 @@
+Deep Learning Framework
+ and Auto Differentiation
+           Lei Li
+          Recap of GPU Acceleration
+• Tiling for efficient matrix computation
+
+• Coalesced memory access
+
+• Sparse matrix representation and multiplication
+
+• cuBLAS
+
+
+
+
+                                                    2
+                    Today’s Topic
+• Learning algorithm for Neural Network
+
+• Computation Graph
+
+• Auto Differentiation
+
+• Put Together: Implementing a Deep Learning Framework
+
+
+
+
+                                                         3
+ A Simple Feedforward Neural Network
+• Neural network layers             Softmax
+  o Embedding (lookup table)
+                                      Avg
+  o Linear
+  o Relu                             Linear
+  o Average pooling
+  o Softmax                           Relu
+
+                                     Linear
+
+                                   Embedding
+                               “It is a good movie”   4
+               The Learning Problem
+• Given a training set of input-output pairs 𝐷
+  = {(𝑥𝑛 , 𝑦𝑛 )}𝑁
+                𝑛=1
+  o 𝑥𝑛 and 𝑦𝑛 may both be vectors
+                                                     𝑦
+• To find the model parameters such that the model
+  produces the most accurate output for each
+  training input
+  o Or a close approximation of it
+
+• Learning the parameter of a neural network is an   𝑿
+  instance!
+  o The network architecture is given
+
+                                                         5
+       Training Loss for Classification
+• 𝑥𝑛 , 𝑦𝑛 are data and label pairs for training
+
+• Cross entropy
+                          1 𝑁
+                   ℒ(𝜃) =    ∑ − log𝑓(𝑥𝑛 )𝑦𝑛
+                          𝑁 𝑛=1
+
+• Pytorch CrossEntropyLoss is implemented as
+  o Negative Likelihood on logits (instead of log of softmax)
+
+
+
+                                                                6
+Today’s focus (using PyTorch Example)
+loss = nn.CrossEntropyLoss()
+
+output = loss(input_logits, target_labels)
+
+grads = output.backward()
+                               how is backward implemented?
+                               how does it work on any network?
+
+
+
+                                                                  7
+   Generic Iterative Learning Algorithm
+• Consider a generic function minimization problem, where x is
+  unknown variable
+                  min 𝑓(𝑥) where 𝑓: ℝ𝑑 → ℝ
+                     𝑥
+
+• Iterative update algorithm
+                         𝑥𝑡+1 ← 𝑥𝑡 + Δ
+• so that 𝑓(𝑥𝑡+1 ) ≪ 𝑓(𝑥𝑡 )
+
+• How to find Δ
+
+                                                                 8
+                        Gradient Descent
+                                              𝑇
+• 𝑓(𝑥𝑡 + Δ𝑥) ≈ 𝑓(𝑥𝑡 ) + Δ𝑥 𝛻𝑓|𝑥𝑡
+
+• To make Δ𝑥 𝛻𝑓|𝑥𝑡 smallest
+                    𝑇
+  o ⇒ Δ𝑥 in the opposite direction of 𝛻𝑓|𝑥𝑡 i.e.Δ𝑥 = −𝛻𝑓|𝑥𝑡
+
+
+• Update rule: 𝑥𝑡+1 = 𝑥𝑡 − 𝜂𝛻𝑓|𝑥𝑡
+
+• 𝜂 is a hyper-parameter to control the learning rate
+
+                                                              9
+(Stochastic) Gradient Descent Algorithm
+set learning rate eta.
+1. set initial parameter 𝜃 ← 𝜃0
+2. for epoch = 1 to maxEpoch or until converg:
+3. for each batch in the data:
+4. total_g = 0
+5. for each data (x, y) in data batch:
+6.     compute error err(f(x; 𝜃) - y)
+                              𝜕err(𝜃)
+7.    compute gradient 𝑔 =
+                                𝜕𝜃
+8.    total_g += g
+9.   update 𝜃 = 𝜃 - eta * total_g / N
+                                                 10
+ How to compute the gradient for every
+  parameter in an “arbitrary network”?
+                  𝜕𝑙                               Softmax
+• Goal: compute         for every parameter
+                  𝜕𝑤𝑖
+                                                     Avg
+• Forward computation
+                                                    Linear
+• Backpropogation
+                                                     Relu
+
+                                                    Linear
+
+                                                  Embedding
+                                              “It is a good movie”   11
+                    Today’s Topic
+• Learning algorithm for Neural Network
+
+• Computation Graph
+
+• Auto Differentiation
+
+• Put Together: Implementing a Deep Learning Framework
+
+
+
+
+                                                         12
+               Computation Graph
+• Calculations on a neural network can be defined using
+  computation graph
+
+• Each node denotes a variable or an operation
+
+• Directed edges to connect nodes, indicating the input
+  values for operations.
+      𝑥1          ℎ2
+                      relu(.) ℎ3        ℎ4          𝑜5
+                *                     *     CEloss
+
+        𝑤1                     𝑤2                𝑦1       13
+x1= 3, x2=0.5
+f = x1 + exp(1.5 * x1 + 2.0 * x2)
+                                          To perform Computation:
+𝑥1             1.5        𝑥2        2.0   1. Topological sorting of all
+                                             nodes
+          *                    *
+          𝑥3                   𝑥4         2. Calculate the value for
+                     +                       each node given its input
+                     𝑥5
+
+          exp(.)
+               𝑥6
+     +
+     𝑥7
+                                                                          14
+                               Topological Sort
+𝑥1             1.5        𝑥2        2.0   • Put all nodes into un-
+                                            processed queue.
+          *                     *
+          𝑥3                   𝑥4
+                     +                    • Repeatedly, find a node
+                     𝑥5                     without incoming edges from
+                                            un-processed nodes
+          exp(.)
+                                            o evaluate its value based on
+               𝑥6                             operation
+     +                                      o remove the node from the
+     𝑥7                                       queue and add it to processed
+                                              queue
+                                                                              15
+                    Today’s Topic
+• Learning algorithm for Neural Network
+
+• Computation Graph
+
+• Auto Differentiation
+
+• Put Together: Implementing a Deep Learning Framework
+
+
+
+
+                                                         19
+               Gradient Calculation
+• To learn a neural network, we need gradient of loss function
+  w.r.t. parameters.
+
+• Parameters are also variables, and represented as nodes in
+  the computation graph.
+
+• Chain rule => backpropogation
+                     𝑑𝑦(𝑧) 𝑑𝑦(𝑧) 𝑑𝑧
+                          =     ∙
+                      𝑑𝑥    𝑑𝑧 𝑑𝑥
+
+
+                                                                 20
+ x1= 3, x2=0.5                                                             𝜕𝑦
+y=x1 + exp(1.5 * x1 + 2.0 * x2)                Computing the derivatives
+                                                                           𝜕𝑥𝑖
+                                                              𝜕𝑦
+ 𝑥1              𝑤1                            Define 𝑥ഥ𝑖 =
+                = 1.5        𝑥2         𝑤2
+                                       = 2.0                  𝜕𝑥𝑖
+
+           *                      *
+           𝑥3                     𝑥4
+                        +
+                        𝑥5
+
+           exp(.)
+                𝑥6
+      +
+      𝑥7
+                                                                                 21
+ x1= 3, x2=0.5                                                                𝜕𝑦
+y=x1 + exp(1.5 * x1 + 2.0 * x2)                Computing the derivatives
+                                                                             𝜕𝑥𝑖
+                                                              𝜕𝑦
+ 𝑥1              𝑤1                            Define 𝑥ഥ𝑖 =
+                = 1.5        𝑥2         𝑤2
+                                       = 2.0                  𝜕𝑥𝑖
+                                                            𝑥7 = 1
+           *                      *                         𝑥6 = 1
+           𝑥3                     𝑥4
+                        +                            𝜕𝑦 𝜕𝑥6
+                                               𝑥5 =      ∙       = 𝑥6 ∙ exp(𝑥5 )
+                        𝑥5                          𝜕𝑥6 𝜕𝑥5
+                                                           𝜕𝑦 𝜕𝑥5
+           exp(.)                                   𝑥4 =       ∙     = 𝑥5
+                                                          𝜕𝑥5 𝜕𝑥4
+                𝑥6                                         𝜕𝑦 𝜕𝑥5
+      +                                             𝑥3 =       ∙     = 𝑥5
+                                                          𝜕𝑥5 𝜕𝑥3
+      𝑥7                                                𝜕𝑦 𝜕𝑥4
+                                                 𝑤2 =        ∙      = 𝑥4 ∙ 𝑥2
+                                                       𝜕𝑥4 𝜕𝑤2                   22
+            Node with multiple outgoing edges
+                             𝜕𝑦        𝜕𝑧
+    𝑥              𝑥ҧ = 𝑦ത ∙    + 𝑧ҧ ∙
+                             𝜕𝑥        𝜕𝑥
+
+𝑦       𝑧
+
+
+    …
+
+
+
+
+                                                23
+       Partial derivatives for Vectors
+Jacobian
+                  𝜕𝑦1    𝜕𝑦1
+       𝜕𝑦         𝜕𝑥1    𝜕𝑥2         row: keep y index, iter x index
+    𝐽=    =
+       𝜕𝑥         𝜕𝑦2    𝜕𝑦2
+                  𝜕𝑥1    𝜕𝑥2
+
+
+           col: keep x index, iter y index
+
+
+                                                                       24
+            Vector Jacobian Product
+                               𝜕𝑦1   𝜕𝑦1
+                      𝜕𝑦       𝜕𝑥1   𝜕𝑥2
+                   𝐽=    =
+                      𝜕𝑥       𝜕𝑦2   𝜕𝑦2
+                               𝜕𝑥1   𝜕𝑥2
+
+• computing the partial derivative for each node (vector)
+                           𝑥ҧ = 𝐽𝑇 𝑦ത
+
+
+
+                                                            25
+Example
+  𝑦 = 𝑊𝑥
+ 𝑥ҧ = 𝑊 𝑇 𝑦ത
+
+
+
+
+               26
+                Auto Differentiation
+• Instead of explicitly computing the derivatives (gradients) for
+  each data sample following the backward direction
+
+• Construct a computation graph for gradient calculation for
+  every node
+
+• Applicable to any input data (and output=loss)
+
+
+
+
+                                                                    28
+ x1= 3, x2=0.5                                                             𝜕𝑦
+y=x1 + exp(1.5 * x1 + 2.0 * x2)                Computing the derivatives
+                                                                           𝜕𝑥𝑖
+                                                              𝜕𝑦
+ 𝑥1              𝑤1                            Define 𝑥ഥ𝑖 =
+                = 1.5        𝑥2         𝑤2
+                                       = 2.0                  𝜕𝑥𝑖
+
+           *                      *
+           𝑥3                     𝑥4
+                        +
+                        𝑥5
+
+           exp(.)
+                𝑥6
+      +
+      𝑥7
+                                                                                 29
+ x1= 3, x2=0.5
+y=x1 + exp(1.5 * x1 + 2.0 * x2)
+
+ 𝑥1              𝑤1
+                = 1.5        𝑥2           𝑤2
+
+                                                                                𝑥2
+                                                                                               * 𝑤2
+                                         = 2.0
+                                                 𝑥1                   𝑤1
+           *                                      +              *                   *
+                                  *
+           𝑥3                     𝑥4                  𝑥1→3                                𝑥4
+                                                                 𝑥3
+                        +                                    *            id             id
+                        𝑥5
+                                                                           𝑥5
+           exp(.)                                        𝑥5→6         *
+                                       exp(.)
+                𝑥6
+                                                                      𝑥6
+      +                                                                    id
+      𝑥7                                                              𝑥7
+                                                                      =1
+                                                                                                      30
+Implementing Backward Pass
+     (important for HW2)
+
+
+
+
+                             31
+Build the AutoDiff Graph
+
+
+
+
+                           32
+Use AutoGrad
+
+
+
+
+               33
+How to check the correctness of gradient
+• use finite differences to check our gradient calculations
+            𝜕𝑓(𝑥1 , 𝑥2 ) 𝑓 𝑥1 + ℎ, 𝑥2 − 𝑓(𝑥1 − ℎ, 𝑥2 )
+                        =
+               𝜕𝑥1                    2ℎ
+
+• Care the precision!
+  o Use double precision (fp64)
+  o Pick a small ℎ = 0.000001
+  o Compute the forward difference through the graph twice
+
+
+                                                              34
+                              Quiz
+     𝑥1                  𝑤
+
+                *
+                𝑥2
+                     -
+                𝑥3
+                     exp(.)
+𝑥5
+=1              𝑥4
+     +
+     𝑥6
+          1/x
+     𝑥7                              35
+                    Today’s Topic
+• Learning algorithm for Neural Network
+
+• Computation Graph
+
+• Auto Differentiation
+
+• Put Together: Implementing a Deep Learning Framework
+
+
+
+
+                                                         36
+Deep Learning Frameworks (also for LLMs)
+ • expressive to specify any neural networks
+   o support future custom operators/layers
+
+ • productive for ML engineers
+   o hide low-level details (no need to write cuda)
+   o automatic differentiation (no need to derive gradient calculation
+     manually)
+
+ • efficient in large-scale training and inference
+   o automatically scale to data and model size
+   o automatic hardware acceleration                                     37
+Aspect        PyTorch             TensorFlow          JAX               NumPy
+                                                      numerical and     numerical
+Primary Use   Deep learning       Deep learning
+                                                      ML computing      computing
+Programming Dynamic (eager        Static (Graph     Functional
+                                                                     Procedural
+Paradigm    execution)            mode, or Eager)   transformations
+            dynamic comp                            Functional-based
+Autograd                          static comp graph                  Not available
+            graph                                   with grad/jit
+Hardware
+            CPU, GPU, TPU         CPU, GPU, TPU CPU, GPU, TPU CPU only
+Support
+                                  a bit learning      Pythonic and      Very easy, native
+Ease of Use   Pythonic
+                                  curve               functional        python
+                                  TensorBoard,
+              PyTorch Lightning,                      integrates with
+Ecosystem                         TensorFlow                            NA
+              TorchVision                             NumPy
+                                  Extended
+              Multi-GPU with      Multi-GPU/TPU       Multi-GPU/TPU
+Parallelism                                                         No parallelism
+              DataParallel or DDP via tf.distribute   via pmap                              38
+    Deep Learning Framework Design
+               Principles
+• Dataflow graphs (computation graph) of primitive operators
+
+• Deferred execution (two phases)
+  1. Define program i.e., symbolic dataflow graph w/ placeholders,
+  essentially constructing the computation graph
+  2. Executes optimized version of program on set of available
+  devices
+
+
+
+
+                                                                     39
+Basic Components (follows tensorflow)
+• A Computation Graph, which contains these nodes
+  o Placeholder: to store the input data (as tensors/multi-dim array)
+  o Variable: to store the network parameters
+  o Constant: some static data
+  o Operation: the mathmatical operations for each neural network
+    layer, the input are any of these nodes, result is stored in output
+     ▪ each operation needs to define forward and backward operation
+
+• Session: execution environment
+  o Perform computation via the topological sort of the nodes
+                                                                          40
+            All data are represented Tensor
+• A tensor is a multi-dimensional array. generalization to vector
+  and matrix
+
+tf.constant([[1, 2], [3, 4]])
+
+is a 2x2 tensor with element type int32
+
+tf.Tensor([[2 3] [4 5]], shape=(2, 2), dtype=int32)
+
+Pytorch:
+torch.tensor([[1., 2.], [3., 4.]])
+                                                                    41
+Example Computation Graph in Tensorflow
+             ℎ = 𝑅𝐸𝐿𝑈(𝑊𝑥 + 𝑏)
+
+import tensorflow as tf
+
+b = tf.Variable(tf.zeros((100,)))
+W = tf.Variable(tf.random_uniform((784, 100), -1, 1))
+
+x = tf.placeholder(tf.float32, (1, 784))
+
+h = tf.nn.relu(tf.matmul(x, W) + b)
+
+
+                                                        42
+        Placeholder Node (Tensorflow v1)
+             ℎ = 𝑅𝐸𝐿𝑈(𝑊𝑥 + 𝑏)
+x = tf.placeholder(tf.float32, (1, 784))
+
+
+ • Represent Inputs, Labels, …
+ • value is fed in at execution time
+ • No need to explicitly define
+   Placeholder in Tensorflow v2
+
+
+
+                                           43
+ℎ = 𝑅𝐸𝐿𝑈(𝑊𝑥 + 𝑏)
+                 Variable Node
+b = tf.Variable(tf.zeros((100,)))
+tf.Variable(initial_value=None,
+  trainable=None,
+  name=None)
+• Variables are stateful nodes
+  which output their current value.
+
+• State is retained across multiple
+  executions of a graph
+
+• mostly parameters
+                                      44
+                      Operation Node
+        ℎ = 𝑅𝐸𝐿𝑈(𝑊𝑥 + 𝑏)
+tf.linalg.matmul(a, b): multiply two matrices
+tf.math.add(a, b): Add elementwise
+tf.nn.relu(a): Activate with elementwise
+rectified linear function ReLu(x) = 0, x <= 0
+                                    x, x > 0
+Pytorch:
+torch.matmul(a, b)
+torch.add(a, b)
+torch.nn.ReLU(a)                                45
+        Implementing Operation Node
+• need to define the input nodes and forward/backward func
+    class AddOperation(Operation):
+     # define Add operation a+b
+     def __init__(self, a, b):
+      # a, b are input nodes.
+      super().__init__([a, b])
+
+     def forward(self, a, b): # calculating the result of op
+      return a + b
+
+     def backward(self, upstream_grad):
+      …
+                                                               46
+              Defining Loss as a node
+• Use placeholder for labels
+• Build loss node using labels and prediction
+
+ prediction = tf.nn.softmax(...) #Output of neural network
+ label = tf.placeholder(tf.float32, [100, 10])
+
+ cross_entropy = -tf.reduce_sum(label * tf.log(prediction), axis=1)
+
+
+
+                                                                      47
+                     Gradient Computation
+train_step = tf.train.GradientDescentOptimizer(0.5).minimize(cross_entropy)
+
+
+  • tf.train.GradientDescentOptimizer is an Optimizer object
+
+  • tf.train.GradientDescentOptimizer(lr).minimize(cross_entropy) adds
+    optimization operation to computation graph
+
+  • TensorFlow graph nodes have attached gradient operations
+
+  • Gradient with respect to parameters computed with Auto
+    Differentiation (recall previous)
+                                                                              48
+                           Session
+
+In TF v1, to deploy graph with a
+session: a binding to a particular
+execution context (e.g. CPU,         CPU
+GPU)
+                                     GPU
+with tf.Session() as s:
+ …
+ s.run()
+                                           49
+50
+       Implementing Topological Sort
+• For each Operation node (using isinstance to check)
+  o recursively find the incoming nodes, visit them first and add node
+    to visited nodes.
+
+
+
+
+                                                                         51
+               Implementing Session
+• Apply topological sort on the computation graph starting
+  from the final operation node
+
+• Feeding data using a dictionary that maps Placeholder to
+  actual data array
+
+• Compute value for each node:
+  o If a node is a placeholder, it should take value from feed_dict
+  o If a node is variable or constant, it just use the node's value
+  o If a node is an operation, it should get the node's input_nodes,
+    and then apply forward                                             52
+Code Practice: Implement Computation
+                Graph
+https://github.com/llmsystem/llmsys_code_examples/tree/mai
+n/mini_tensorflow
+
+Please follow the instructions and fill in the code in
+
+https://github.com/llmsystem/llmsys_code_examples/blob/mai
+n/mini_tensorflow/mini_tensorflow.ipynb
+
+The full code is provided in
+
+https://github.com/llmsystem/llmsys_code_examples/blob/mai
+                                                             53
+                              Summary
+• Learning parameters of an NN needs gradient calculation
+
+• Computation Graph
+   o to perform computation: topological traversal along the DAG
+
+• Auto Differentiation
+   o building backward computation graph for gradient calculation
+
+• Put together: Deep Learning Framework
+   1. Define program i.e., symbolic computation graph w/
+   placeholders/variable/operation nodes
+   2. Executes (optimized) computation graph on a set of available devices
+                                                                             54
+                Additional Reading
+• Auto Diff survey, https://arxiv.org/abs/1502.05767
+
+• The Elements of Differentiable Programming (Book),
+  https://arxiv.org/abs/2403.14606
+
+• TensorFlow: A System for Large-Scale Machine Learning,
+  OSDI 2016.
+
+
+
+
+                                                           55
+              Quiz
+• on canvas
+
+
+
+
+                     56
+                              HW2
+• https://llmsystem.github.io/llmsystemhomework/assignment
+  _2/
+
+• join the recitation session this Friday to learn about
+  mini_torch framework for HW2
+  o please bring your laptop for coding practice
+
+
+
+
+                                                             57
+

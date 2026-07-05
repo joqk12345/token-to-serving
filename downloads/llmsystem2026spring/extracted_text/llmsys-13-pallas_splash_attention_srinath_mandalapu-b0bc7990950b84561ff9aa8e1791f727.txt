@@ -1,0 +1,2205 @@
+                Pallas Kernels
+               Splash Attention
+
+
+Srinath Mandalapu
+CoreML Frameworks - Google
+                                  1
+Agenda
+●   Motivation for Custom Kernels
+      ○ HBM Bottleneck & Memory Wall
+●   Pallas Fundamentals
+      ○ Memory Hierarchy (HBM, VMEM, SMEM)
+      ○ BlockSpec Partitioning, Asynchronous Pipelining
+●   Flash Attention Architecture
+      ○ Tiled execution over Q, K, and V, Online Softmax
+      ○ Fused Key Ops & Delayed Normalization
+●   Splash Attention & Sparsity
+      ○ Sparse Execution Map (MaskInfo)
+      ○ Joint Masking (Causal, Local, & Segment IDs)
+      ○ Performance Tuning (Tile Sizes)
+
+
+
+
+                                                           2
+3
+Motivation
+
+
+
+             4
+Moving Beyond XLA Fusions
+The HBM Bottleneck: While XLA successfully fuses basic ops, standard Attention fusions often require
+the large logit matrix to be written back to High Bandwidth Memory (HBM) for the Softmax reduction,
+leading to low compute-to-memory efficiency.
+Vector Unit Limitations: Standard JIT-compiled fusions can leave the Matrix Execution Unit (MXU) idle
+while the Vector Processing Unit (VPU) handles complex exponential and sum operations, resulting in a
+low percentage of peak FLOPs.
+VMEM Residency & Loop Control: Pallas provides direct control over the iteration space and data
+movement between HBM and VMEM. This enables "Online Softmax" algorithms that keep data local,
+bypassing the HBM "memory wall" that limits standard XLA fusions.
+
+Temporal Control via LLO: You manage the temporal flow (scheduling when compute occurs), while the
+backend handles the spatial layout (T(8,128) tiling). By bypassing HLO and lowering from Palls Custom
+Call → MLIR → LLO, Pallas prevents the compiler from reordering your manual optimizations or "undoing"
+your kernel orchestration.
+
+
+                                                                                                         5
+Recap: Simple Attention Mechanism
+●   Core Mechanism: Attention weighs input parts,
+    enabling models to focus on relevant information by
+    computing a weighted sum.
+     ○ O = softmax(QKᵀ / √dₖ) V                                 Simple Example:
+                                                                8 tokens
+           ■ Q = Query, K = Key, V = Value,
+           ■ dₖ = Key dimension, O = Output
+●   Causal Masking: Causal masks are applied to QKᵀ in
+    decoders to prevent attending to future tokens, before
+    the softmax function.
+     ○ If mask[i, j] = 0, then (QKᵀ)[i, j] = -∞
+     ○ Where i is the query position and j is the key pos.
+●   Regularization: Dropout (p) for regularization is applied
+    to the softmax output before multiplying by V.
+     ○ O = dropout(softmax(QKᵀ / √dₖ), p) V
+                                                                                  6
+Basic Attention
+
+
+
+
+                  7
+Summary of XLA Fusions for Attention
+Fusion Name              Description & Key Steps                  Primary Inputs & Outputs
+                       Logit Generation & max : Performs the
+                       first matrix contraction (Q×K^T), applies
+                       the attention mask, and immediately
+Logit & Max Fusion     finds the row-wise maximum to prepare In: Q (1024x512), K(1024x512), Mask (1024×1024)
+(%fused_computation.7) for numerical stability.                  Out: Max Logits (1024), Masked Logits (1024×1024)
+                       Exp & Reduction: Subtracts the row
+                       maximums from the logits, computes
+                       the hardware-native base-2 exponential
+                       (e^(x−max)), and reduces the results via
+Softmax Denominator    summation to create the Softmax          In: Masked Logits (1024x1024), Max Logits(1024)
+(%fused_computation.3) denominator.                             Out: Sum of Exponentials (1024)
+                         Rematerialize & Project: Re-calculates
+                         e^{(x-max)} and divides by the sum to      In: Value V(1024x512), Masked Logits (1024x1024),
+                         generate probabilities. These results are Max Logits (1024), Sum of Exponentials (1024)
+Attention Output         fed directly into the MXU for the final PV
+(%fused_computation)     contraction.                               Out: Context Vector (1024×512)
+                                                                                                                        8
+                                                                                                      TPU Ironwood
+
+
+
+Simple Attention Fusions Summary
+                                                                                                      Peak FLOP Rate per TensorCore: 1028.75 TFLOP/s
+                                                                                                      Peak HBM Bandwidth per TensorCore: 3433 GiB/s
+                                                                                                      Peak VMEM Read Bandwidth per TensorCore: 27180 GiB/s
+                                                                                                      Peak VMEM Write Bandwidth per TensorCore: 19932 GiB/s
+
+
+    Metric               Fusion 1: Logit & Max             Fusion 2: Softmax Denom           Fusion 3: Attention Output
+                         Q×K^T, Mask, Row-Max
+                         Q(1024, 512) K(1024, 512)                                           P×V Projection
+    Primary Task         Flops = 2 * 1024* 512*1024        e^(x−max) and Row-Sum             P(1024, 1024) V(1024, 512)
+    Key Inputs           Q,K, Mask                         Masked Logits, Max Logits         V, Masked Logits, Max, Sum
+    Key Outputs          Max Logits, Masked Logits         Sum of Exponentials               Context Vector
+    Avg Execution Time                           3.04 us                         636.25 ns                           2.92 us
+    FLOPS Utilization             34.45% (of 1028.75)                              0.32%                             35.82%
+    FLOP Rate (Core)                  354.36 TFLOP/s                       3.29 TFLOP/s                   368.49 TFLOP/s
+    HBM Bandwidth Util        18.74% (of 3433 GiB/s)              0.00% (On-Chip only)                               19.49%
+    On-Chip Read Util           3.55%(of 27180 GiB/)                               22.61%                             7.39%
+
+
+●     Compute Throughput & MXU Efficiency: Fusions 1 and 3 leverage the Matrix Execution Unit (MXU) to achieve over 350
+      TFLOP/s (~35% of peak), calculating 2mkn operations (2x1024x512x1024) in ~3mus while processing masks and biases "for free".
+●     SRAM Residency & HBM Bypass: XLA achieves 0.00% HBM utilization in Fusion 2 by keeping the 1024x1024 logit matrix
+      resident in VMEM, bypassing the 3,433 GiB/s HBM bottleneck and allowing for a high-speed local reduction.
+●     Vector Unit Bottleneck & VMEM Demand: The shift to the VPU for Softmax reduces FLOPS to 0.32% but spikes On-Chip Read
+      utilization to 22.61%, as the VPU consumes data from VMEM at 6.60 TB/s to perform exponentials and row-sums.
+                                                                                                                                                              9
+Pallas Kernels in LLM Training
+Splash Attention (Fusion & Sparsity): Optimizes memory by fusing
+multiple computational stages into a single kernel to avoid HBM
+bottlenecks. It leverages "sparsity-awareness" to skip irrelevant or padded
+regions, maximizing throughput for long-context sequences.
+
+Ring Attention (Distributed Context): Distributes the attention calculation
+across a device mesh by "ringing" key-value blocks between devices. This
+enables processing of massive sequence lengths that exceed the memory
+capacity of a single TPU node.
+
+MoE Optimization (Ragged All-to-All & GMM): Replaces standard MLP
+layers with sparse experts. Specialized Ragged All-to-All kernels handle
+variable-sized token exchanges between devices, while Grouped Matrix
+Multiplication (GMM) executes multiple experts in one pass—eliminating
+padding and the need for "token dropping."
+                                                                              10
+Pallas Kernels in LLM Inference
+Paged Memory Mapping: To eliminate padding waste, Paged Attention
+partitions the KV cache into fixed-size physical pages. This allows
+non-contiguous storage of logical sequences in a global pool, achieving
+near-100% memory utilization for "ragged" batches.
+
+Pallas for Page Indirection: Since standard XLA cannot traverse
+non-contiguous page tables, Pallas kernels manually orchestrate the pointer
+indirection. This enables the TPU to load fragmented pages into at peak
+speeds, bypassing the "memory wall."
+
+
+
+
+                                                                          Page Attention optimizes memory by mapping
+                                                                          logical sequences to a fragmented physical
+                                                                          memory, allowing for efficient storage of
+                                                                          Key-Value (KV) cache data
+                                                                            ● (Example: Four Sequences)              11
+Pallas Kernels Fundamentals
+
+
+
+                              12
+Why Pallas Kernels?
+The Abstraction Ceiling: While JAX JIT automates HLO fusions, its generic lowering can obscure
+the "physical reality" of data movement. For complex operations like Attention, the compiler may
+default to conservative memory patterns that leave the hardware underutilized.
+
+Breaking the Memory Wall: Pallas allows you to explicitly orchestrate the memory hierarchy. By
+manually scheduling data transfers between HBM and VMEM, you can ensure that the data required
+for the next computation is pre-fetched, bypassing the latency bottlenecks of automated fusions.
+
+Manual Macro-Tiling & Pipelining: You gain direct control over loop nesting and block sizes
+(macro-tiling). This enables "ping-pong" buffering—where you overlap the loading of the next tile with
+the computation of the current tile—ensuring the MXU never sits idle waiting for memory.
+
+
+
+
+                                                                                                         13
+TPU Tensor Core Layout
+
+
+
+
+                         14
+Memory Performance
+HBM vs. VMEM
+Arithmetic Intensity Defined: This is the ratio of mathematical operations (FLOPs) to the bytes of data
+moved from memory.
+Memory-Bound vs. Compute-Bound: Low-intensity tasks wait for data (memory-bound), while
+high-intensity tasks keep the hardware fully occupied with math (compute-bound).
+The VMEM Speed Advantage: VMEM provides significantly higher bandwidth than HBM, acting as a
+high-speed "lane" directly next to the execution units.
+Peak Efficiency at Low Intensity: Because data moves faster in VMEM, even data-heavy algorithms with
+an intensity of 10–20 can reach peak FLOPs.
+Capacity Trade-off: VMEM is optimized for speed over size, offering roughly 0.1 GiB of storage
+compared to the 10–100 GiB available in HBM.
+
+
+                                                                                                          15
+TPU Memory Spaces
+
+Pallas Enum                   TPU Memory Space Description
+                                                     A default memory space used when the exact location
+                                                     doesn't matter, typically resolves to HBM for large
+pltpu.MemorySpace.ANY         HBM (or VMEM)          tensors.
+
+                                                     Fast, on-chip SRAM for the Vector Unit (matrix/vector
+pltpu.MemorySpace.VMEM        Vector Memory (VMEM)   operations). It's smaller than HBM but much faster.
+
+                                                     Fast, on-chip SRAM for the Scalar Unit. Used for storing
+pltpu.MemorySpace.SMEM        Scalar Memory (SMEM)   small, temporary scalar and control flow values.
+                                                     A very small, dedicated SRAM region used for inter-core
+                                                     synchronization (e.g., locking) between computation
+pltpu.MemorySpace.SEMAPHORE   Semaphore Memory       units.
+
+
+                                                                                                                16
+Pallas Abstractions
+Pythonic Array Abstraction: Pallas provides a Python-based API that
+lets you define kernels as high-level array programs. It abstracts away
+low-level synchronization, allowing you to focus on the logic of the
+computation rather than hardware-specific assembly.
+
+Automated Data Orchestration: The language handles the heavy
+lifting of HBM ↔ VMEM transfers and the pipelining of memory
+movement with execution, removing the need for manual DMA
+management or explicit memory staging.
+
+Managed Hardware Scaling: Pallas automatically maps your Python
+logic across the hardware, handling parallelization over TPU cores and
+generating optimized code that balances data flow and compute
+efficiency.
+
+
+                                                                          17
+Simple Matrix Addition Kernel
+
+def add_matrices_kernel(x_vmem_ref, y_vmem_ref, z_vmem_ref):
+  # Load x and y from VMEM into registers
+  x_regs = x_vmem_ref[:, :]
+  y_regs = y_vmem_ref[:, :]
+  # Execute a vectorized add
+  z_regs = x_regs + y_regs
+  # Store the output values in registers back into VMEM
+  z_vmem_ref[:, :] = z_regs
+
+
+def add_matrices(x: jax.Array, y: jax.Array) -> jax.Array:
+  # pallas_call will first allocate scratch buffers for `x` and `y` in VMEM.
+  # It will then copy `x` and `y` from HBM into VMEM.
+  z = pl.pallas_call(
+      add_matrices_kernel, out_shape=jax.ShapeDtypeStruct(x.shape, x.dtype)
+  )(x, y)
+  # pallas_call will also copy the output from VMEM back into HBM.
+  return z
+
+
+x, y = jnp.ones((512, 512)), jnp.ones((512, 512))
+add_matrices(x, y)
+
+                                                                               18
+ VMEM - Out-of-Memory (OOM)
+ The VMEM Bottleneck: Simple Pallas (pallas_call without BlockSpec) attempts to load entire
+ tensors into VMEM (SRAM) simultaneously. Since VMEM is tiny (e.g., 32MB per core), even a
+ standard 2048x2048FP32 matrix (16MB) plus workspace quickly triggers an Out-of-Memory
+ (OOM) error.
+
+ Tiling with BlockSpec: To process LLM-sized tensors, you must partition the computation into
+ smaller, manageable chunks. BlockSpec allows you to define these tiles, ensuring only the
+ necessary data fragments are resident in VMEM at any given time.
+
+ Hiding Latency via Pipelining: Once tiled, Pallas enables software pipelining to "hide" slow
+ HBM transfers. While the TPU computes the current tile in VMEM, Pallas pre-fetches the next tile
+ from HBM in the background, ensuring the compute units never sit idle.
+
+
+XlaRuntimeError: RESOURCE_EXHAUSTED: Ran out of memory in memory space vmem while allocating on stack for %tpu_custom_call.1 = f32[2048,2048]{1,0:T(8,128)}
+custom-call(%args_0_.1, %args_1_.1), custom_call_target="tpu_custom_call", operand_layout_constraints={f32[2048,2048]{1,0}, f32[2048,2048]{1,0}},
+metadata={op_name="jit(wrapped)/pallas_call" source_file="/tmp/ipython-input-6-1996092727.py" source_line=14 source_end_line=17 source_column=6 source_end_column=9}.
+Scoped allocation with size 48.01M and limit 32.00M exceeded scoped vmem limit by 16.01M. It should not be possible to run out of scoped vmem - please file a bug against XLA.
+
+
+                                                                                                                                                                                 19
+Pipelining in TPU                                                     Pipelining - Addition
+
+●   Efficiency through Parallelism: TPUs use pipelining to overlap
+    data movement with computation to eliminate idle time.
+●   VPU vs. MXU Roles: While the MXU (Matrix Execution Unit)
+    handles large multiplications, the Vector Processing Unit (VPU)
+    performs element-wise operations like addition and activation
+    functions.
+●   Streamlined Data Flow: High-Bandwidth Memory (HBM) copies
+    data to Vector Memory (VMEM), the VPU/MXU executes the op,
+    and results stream back to HBM.
+●   Bottleneck Reduction: Continuous overlapping keeps execution
+    units saturated, preventing memory-bound delays during
+    complex ML workloads.
+
+
+                                                                                              20
+Pipelining Example                                                     MXU            Vector
+
+
+Idea: overlap loading/storing with compute by tiling                               VREG
+                                                                 VREGs             xVREG
+                                                                                    x10,y,0y
+                                                                                       1 1
+                                                                                       0
+                                                                                           ,z01 10
+inputs/outputs
+●   Allocate output buffer for z
+                                                                         x0   x1       y0    y1
+●   Allocate VMEM scratch space
+●   Copy x0, y0 from HBM into VMEM                                                   VMEM
+●   Start copying x1, y1 from HBM into VMEM
+●   Load x0, y0 into VREGs
+●   Add x0 and y0 using vector core
+●   Store z0 in VMEM
+                                                       x0   x1    y0   y1     z0      z1
+●   Start copying z0 from VMEM into HBM
+●   Wait until x1, y1 are done copying into VMEM
+●   Load x1, y1 into VREGs
+●   Add x1 and y1 into using vector core
+
+
+                                                                                        HBM
+
+                                                                                                     21
+Pallas Pipelining API
+The Pallas Pipelining API automates the management of multiple buffers and asynchronous
+memory transfers, hiding HBM latency by overlapping data movement with active computation.
+
+Component          Role in Pipelining         Key Features
+                                              Defines the loop structure as a tuple (N, M, ...). It dictates the total
+                   Defines the Structure of   iteration space, where the kernel is invoked prod(grid) times to
+Grid               the Pipeline               solve the global problem.
+                                              Manages data orchestration by defining the block_shape and
+BlockSpecs         Handles Data               index_map. It specifies which HBM data slice is copied to VMEM
+(pl.BlockSpec)     Communication              for each grid index.
+                                              The computational stage that processes a single block. It
+                   Specifies the              operates directly on VMEM buffers and uses pl.program_id to
+Kernel             Computation Stage          identify its current position in the grid.
+Pallas Call        Main Entry Point &         The orchestration entry point that binds the kernel, grid, and
+(pl.pallas_call)   Orchestration              BlockSpecs together into a single executable pipeline.
+
+
+                                                                                                                         22
+Pipelined Sum Kernel
+
+def add_matrices_pipelined_param(
+    x: jax.Array, y: jax.Array, *, bm: int = 256, bn: int = 256
+) -> jax.Array:
+  m, n = x.shape
+  block_spec = pl.BlockSpec((bm, bn), lambda i, j: (i, j))        x[512, 512]   y[512, 512]   out[512, 512]
+  return pl.pallas_call(
+      add_matrices_kernel,
+      out_shape=x,
+      in_specs=[block_spec, block_spec],
+      out_specs=block_spec,
+      grid=(m // bm, n // bn),
+  )(x, y)
+
+x, y = jnp.ones((512, 512)), jnp.ones((512, 512))
+
+np.testing.assert_array_equal(
+    add_matrices_pipelined_param(x, y, bm=256, bn=256), x + y
+)
+
+
+
+
+                                                                                                              23
+Block Computation in Pallas
+                                                              Pallas call scheduler
+Grid Parallelism: The grid parameter defines the iteration
+space, launching the kernel prod(grid) times. This
+structure allows Pallas to parallelize independent array
+programs across TPU cores.
+BlockSpec Partitioning: BlockSpec partitions global
+tensors into smaller blocks that fit in VMEM. It uses index
+maps to determine exactly which data slice corresponds to
+each coordinate in the grid.
+Pipelined Scheduling: pallas_call acts as the orchestrator,
+scheduling kernel launches and constructing a pipeline that
+overlaps HBM data transfers with active computation to
+maximize throughput.
+
+
+
+                                                                                      24
+pallas_call: The Pipeline Orchestrator
+For-Loop Scheduler: At its core, pallas_call acts as a high-performance loop scheduler. It interprets the
+grid as a set of nested loops, orchestrating the execution of kernel instances across the defined iteration
+space.
+Asynchronous Overlap: It automatically emits a pipeline that overlaps HBM ↔ VMEM data transfers
+with active computation. This ensures that while one block is being processed by the MXU, the next is
+already being fetched from memory.
+Buffer Reuse & Efficiency: To minimize memory overhead, pallas_call reuses the same VMEM buffers
+for consecutive kernel instances if the in_specs and out_specs remain consistent, effectively eliminating
+redundant allocations and copies.
+ for i in range(grid[0]):                                                          inputs (HBM)
+ for j in range(grid[1]):
+  …
+  for k in range(grid[-1]):                                      kernel(   in_refs (VMEM) , out_refs (VMEM)   )
+  in_refs = get_in_refs(in_specs, (i, j, ..., k), *inputs)
+  out_refs = get_out_refs(out_specs, (i, j, ..., k))
+  kernel((i, j, ..., k), *in_refs *out_refs)                                      outputs (HBM)
+                                                                                                                  25
+  outputs = update(out_specs, (i, j, …, k), outputs, out_refs)
+Pallas Output Aliasing: In-Place Computation
+Input-Output Aliasing: By mapping an output
+index to an input index (e.g., {2: 0}), Pallas
+instructs XLA to reuse the input's memory buffer
+for the output, eliminating the need for new
+allocations.
+
+In-Place Updates: The kernel overwrites the
+original input data directly (e.g., out[...] = out[...] +
+x[...]), performing a true in-place operation that
+preserves memory space.
+
+Zero-Copy Efficiency: This optimization slashes
+HBM bandwidth usage and reduces latency by
+removing the overhead of redundant data copies
+between memory locations.
+                                                            26
+Two Level Tiling Strategy
+Macro-Tiling (Pallas/User): Orchestrates the HBM ↔ VMEM boundary. You
+define large software blocks (e.g., 1024×1024) to hide high-latency DMA
+transfers. Pallas manages the grid and pipelines the next HBM-to-VMEM fetch
+while the current block is being computed.
+
+
+Micro-Tiling (Compiler/Hardware): Orchestrates the VMEM ↔ VPU boundary.
+The compiler decomposes the large macro-block into the hardware's native
+8×128 processing units. It translates the computation into a tight loop of low-level
+Vector Load, ALU, and Store instructions.
+
+
+HBM (DMA/Macro-Tiling) ↔VMEM (Vector Load/Store Micro-Tiling) VREGS →VPU
+                                                                                       27
+Compiler MLIR & Hardware Alignment
+The MLIR Bridge: MLIR is a compiler framework that translates
+your Python code into hardware instructions through a series of
+"dialects" that understand both high-level logic and low-level TPU
+limits.
+
+Vector Abstraction: Instead of complex loops, the compiler uses a
+simplified vector.load to treat large blocks (e.g., 1024x1024) as single
+units, letting the backend handle the tedious hardware scheduling.
+
+Physical Layout (T(8,128)): Data is organized in memory to match
+the hardware’s native 8×128 processing size. This alignment ensures
+that every memory transfer feeds the VPU at peak efficiency.
+
+Uniform Padding: Pallas automatically pads irregular matrix edges
+with zeros. This guarantees every block is the same size, which avoids
+slow "if-else" branching logic in the hardware.
+
+                                                                           28
+VPU Pipelining
+●    VLOAD (Vector Load): Fetching inputs (X and Y) for the next chunk (8x128) (N+1) from Vector
+     Memory (VMEM) and moving them into the Vector Registers (VRegs).
+●    VALU (Vector ALU): Performing the core element-wise computation (the X+Y) for the current
+     chunk (N) on the Vector Processor Unit.
+●    VSTORE (Vector Store): Writing the computed result (O) for the previously completed chunk
+     (N−1) from VRegs back to VMEM.
+
+
+The O=X+Y addition is a VMem
+bandwidth-bound operation. With an
+operational intensity of only 1 FLOP/12 Bytes
+(requiring two loads for every one store), data
+movement saturates the memory. This is
+confirmed by the 100% utilization of the VLOAD
+and VSTORE units, which starves the VALU,
+keeping its utilization low (e.g., 30%−50%).
+
+
+
+                                                                                                   29
+BlockWise Matrix Multiplication
+ def matmul_small(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+   m, k, n = x.shape[0], x.shape[1], y.shape[0]                  Decomposition: The core idea is to break down a
+   return np.matmul(x, y)
+                                                                 large matmul(X,Y) of size (m, k)×(k, n) into many smaller,
+ def block_matmul(                                               manageable block multiplications.
+     x: np.ndarray,
+     y: np.ndarray,
+     *,                                                          Three Nested Loops: The process is governed by
+     bm: int = 256,                                              three nested loops corresponding to the block dimensions
+     bk: int = 256,
+                                                                 of the output and the summation axis:
+     bn: int = 256,
+ ) -> np.ndarray:
+   m, k = x.shape                                                  ●    Outer loop (M) iterates over output row blocks (m
+   _, n = y.shape                                                       // bm)
+   z = np.zeros((m, n), dtype=x.dtype)
+                                                                   ●    Middle loop (N) iterates over output column blocks
+   for m_i in range(m // bm):                                           (n // bn)
+     for n_i in range(n // bn):                                    ●    Inner loop (K) iterates over the summation axis
+       for k_i in range(k // bk):
+         m_slice = slice(m_i * bm, (m_i + 1) * bm)
+                                                                        blocks (k // bk), where the result is accumulated
+         k_slice = slice(k_i * bk, (k_i + 1) * bk)
+         n_slice = slice(n_i * bn, (n_i + 1) * bn)               Data reuse and locality: Keep the current Z block in
+         x_block = x[m_slice, k_slice]
+         y_block = y[k_slice, n_slice]                           the fast VMEM for its entire accumulation phase
+         z[m_slice, n_slice] += matmul_small(x_block, y_block)
+                                                                                                                              30
+   return z
+Pallas Fundamentals
+Grid: This defines a parallel execution space.
+ grid=(2, 2) means the kernel will be invoked 4 times, with each
+instance processing a different logical slice of the data. TPUs process
+this grid sequentially in lexicographical order.
+
+BlockSpec: This is the core mechanism for memory management. It
+partitions large global tensors in HBM into smaller blocks and maps
+them to specific grid coordinates. Pallas uses BlockSpec to implicitly
+manage DMA transfers between HBM and VMEM, enabling pipelining .
+
+Pipelining: Pallas overlaps data loading/storing from HBM to VMEM
+with the actual computation performed by the MXU. This is crucial for
+keeping the MXU busy and avoiding memory-bound performance.
+
+
+
+                                                                          31
+                                                                                   The 1D grid primarily divides the inner
+1D Grid Pallas Matmul Example                                                      accumulation dimension (k)
+                                                                                                                n
+def pallas_matmul(x, y): x: f32[m, n], y: f32[n, k], out: f32[m, k]
+                                                                          k/4
+                                                                                                                0, 0    k/4
+ def kernel(x_ref, y_ref, out_ref):
+   # x_ref: f32[m, n // num_blocks], y_ref: f32[n // num_blocks, k]                                             1, 0
+   # out_ref: f32[m, k]
+   x_block = x_ref[...]                                               m   0, 0   0, 1   0, 2   0, 3
+   y_block = y_ref[...]                                                                                         2, 0
+   # accumulate the result
+   out_ref[...] = out_ref[...] + jnp.dot(x_block, y_block)                                                      3, 0
+
+m, k, n = x.shape[0], x.shape[1], y.shape[1]
+num_blocks = 4
+
+return pl.pallas_call(                                                                  Computation grid of shape [4]
+    kernel,
+    grid=(num_blocks,), # `num_blocks` kernel calls in total
+    in_specs=[
+        pl.BlockSpec(
+          index_map=lambda i: (0, i),
+          block_shape=(m, k // num_blocks)), # x
+        pl.BlockSpec(
+          index_map=lambda i: (i, 0),
+          block_shape=(k // num_blocks, n)), # y
+    ],
+    out_shape=jax.ShapeDtypeStruct(shape=(m, n), dtype=x.dtype),      m
+    out_specs=pl.BlockSpec(
+        index_map=lambda i: (0, 0), # out
+        block_shape=(m, n),                                                  n
+    ),
+)(x, y)
+                                                                                                                              32
+1D Grid Matmul: Primary Challenges                                                             n
+
+                                                                                               0, 0   k/4
+The VMEM Constraint: This technique requires the entire output     k/4
+                                                                                               1, 0
+matrix Z(M, N) to reside in VMEM simultaneously. For large-scale
+matrices, the output footprint consumes the available VMEM,
+                                                                                               2, 0
+                                                                   0, 0   0, 1   0, 2   0, 3
+
+leaving insufficient space for input buffers and triggering                                    3, 0
+
+Out-of-Memory (OOM) errors.
+
+Zero Output Parallelism: Because the M and N dimensions are
+unpartitioned, the execution grid is forced into a serial
+accumulation. This prevents the workload from being distributed
+across multiple independent TensorCores, capping the compute
+throughput to a fraction of the hardware's potential.
+
+
+
+
+                                                                                                            33
+2D Grid Pallas Matmul
+Abstracted Kernel: Expresses core matrix logic in a single
+Python line, delegating hardware-specific scheduling to the
+Pallas runtime.
+
+pallas_call Orchestrator: Serves as the primary scheduler that
+binds the kernel to the TPU and configures the pipelined
+execution environment.
+
+grid=(2, 2) Parallelism: Launches four simultaneous kernel
+instances, scaling the computation across multiple independent
+TPU compute units.
+
+BlockSpec Data Mapping: Uses lambda index maps to route
+specific HBM data slices to VMEM based on grid coordinates,
+enabling efficient tiling and data reuse.
+
+                                                                 34
+                                                                           K
+
+
+
+2D-Grid MatMul Challenges                                        M                           M
+
+
+                                                                                    N               N
+The 1D Limit: The 1D grid successfully handled the summation by tiling only the reduction axis (K), but
+it failed to parallelize the output plane (MxN).
+
+The 2D Challenge (VMEM Overflow): While a 2D grid grid=(2,2) parallelizes the output, it assumes the
+entire shared dimension (K) can fit in VMEM. For large-scale models, the blocks Xi,full and Yfull,j are too
+massive for on-chip memory, leading to immediate VMEM Overflow.
+
+The 3D Solution: To handle large K dimensions without crashing, a 3D Grid is required. By adding the
+accumulation axis as the third dimension, Pallas can tile M, N, and K simultaneously, ensuring every data
+chunk fits comfortably within VMEM limits while maintaining full output parallelism.
+
+
+
+
+                                                                                                              35
+3D Grid Matrix Multiplication Example
+                                        MegaCore
+
+
+
+
+                                                   36
+3D Grid Matmul: Full Parallelism & Accumulation
+The 3D Grid (m,n,k) is the standard, scalable implementation for block matrix multiplication, tiling all
+three dimensions of the problem: the output height (M), the output width (N), and the summation axis K
+
+Pallas Component    Role in 3D Tiling            Key Mechanism
+                                                 Using grid=(m//bm, n//bn, k//bk) defines a 3D iteration space. The first
+                                                 two axes (M, N) parallelize the output blocks, while the third axis (K) tiles
+Grid                grid=(m//bm, n//bn, k//bk)   the reduction dimension into smaller, VMEM-safe chunks.
+                                                 The output block Z_{i,j} is initialized to zero in VMEM only at the start of
+                                                 the K-loop (pl.program_id(2) == 0). This ensures partial sums are
+Output (Z)          Accumulator Initialization   cleanly accumulated within the core's local memory.
+
+                                                 Pallas optimizes HBM bandwidth by only writing the final accumulated
+                                                 Z_{i,j} block back to main memory once the entire K-axis traversal is
+Output (Z)          Final Write-back             complete, avoiding redundant intermediate stores.
+
+                                                 While the M and N axes are distributed across physical cores for parallel
+                                                 execution, the K axis is processed serially on each core. This maximizes
+Scheduling          Parallelism vs. Serialism    the temporal locality of the X and Y tiles within that core's VMEM.
+
+
+                                                                                                                                 37
+Matrix Multiplication Performance: FLOPs vs. Bandwidth
+Key Metrics for Matmul (m,k)@(k,n)
+Metric              Calculation              Growth Rate
+Floating Point
+Operations          The total number of                                          Cubic
+(FLOPs)             calculations required.   FLOPs≈2⋅m⋅k⋅n                       O(N^3)
+                The minimum size of
+                inputs (X, Y) plus output
+Minimum         (Z) that must be
+Memory          transferred between       BW Usage≈(m⋅k+k⋅n+m⋅n)⋅4               Quadratic
+Bandwidth Usage HBM and VMEM              bytes (for float32)                    O(N^2)
+
+The differing growth rates mean the ratio of FLOPs to BW Usage increases as the matrix size
+grows. This ratio, called Arithmetic Intensity (FLOPs/Byte), determines whether the kernel is
+limited by the processor or the memory.
+                                                                                                38
+The Arithmetic Intensity Ratio
+Arithmetic Intensity (FLOPs/Byte) > Chip Capacity : Compute-Bound (Ideal): The processor (FLOP/s) is
+the bottleneck. Hardware is fully utilized, waiting for computation to finish
+Arithmetic Intensity (FLOPs/Byte) < Chip Capacity : Memory-Bound : Memory bandwidth is the
+bottleneck. Compute units are idling while waiting for data transfers (HBM↔VMEM)
+Ironwood
+ ●   Peak FLOP Rate per TensorCore = 1028.75 TFLOP/s
+ ●   Peak HBM Bandwidth per TensorCore: 3433 GiB/s = 3433 GiB/s × 1.07374 ≈ 3685.5 GB/s
+ ●   Ironwood Arithmetic Intensity = FLOP/s / BW = 1028.75/3.685 ≈ 279.16 FLOPs/Byte
+Square Matrix
+ ●   Matmul Intensity (M = K = N) : (2.M.M.M)/(M.M + M.M+ M.M) * 4 = M/6 FLOPs/Byte
+ ●   Minimum Compute-Bound Size : M/6 > 279
+      ○ M > (279 * 6) > 1674
+
+
+GiB=2^30 GB=10^9                                                                                       39
+Performance Analysis: (4096,7168)×(7168,18432)
+●   Lets analyse matmul (4096,7168)×(7168,18432)
+     ○   No pallas kernel, just jnp.dot(x, y) → dot_general
+     ○   FLOPs = 2 x 4096 x 7168 x 18432 = 1.087 TFLOPs
+●   Ironwood
+     ○   Peak FLOP Rate per TensorCore = 1028.75 TFLOP/s
+     ○   Peak HBM Bandwidth per TensorCore: 3433 GiB/s ≈ 3685.5 GB/s
+●   (4096,7168)×(7168,18432) → 1.45 ms
+     ○   Achieved FLOP/s = 1.087×1012 FLOPs / 1.45 x 10-3 = 748.46 TFLOPS/s
+     ○   Flops Utilization = 748.46/1028.75 = 72.75%
+●   Achieved HBM Bandwidth
+     ○   HBM bandwidth per core ≈ 655.51 GB/s
+     ○   HBM bandwidth utilization = 655.51/3685.5 = 17.78%
+
+
+
+
+                                                                              40
+Visualizing Pallas matmul kernel (4096, 7168) @ (7168, 18432)
+The visualization confirms the highly optimized 1024 tile Pallas kernel achieved a Compute-Bound state, using
+VLOAD/VSTORE overlap to keep the MXU continuously active and effectively hide the memory latency from the
+504 kernel executions.
+
+
+
+
+                                                                                                                41
+Compute vs Memory Bound                                           Roofline Model
+
+●   TPU performance with LLMs is optimized by balancing
+    compute-bound and memory-bound operations.
+●   Compute-bound:
+     ○ The MXU is the bottleneck, fully used for matrix
+         multiplications (attention, feedforward) in LLMs.
+     ○ Example: LLMs with very large layers.
+●   Memory-bound:
+     ○ HBM to VMEM data transfer is the bottleneck.
+     ○ The MXU waits to load large tensors (Q, K, V, weights).
+     ○ Example: Attention with long sequences.
+●   High arithmetic intensity (FLOPs per byte) is preferred for
+    LLM efficiency on TPUs.
+
+                                                                                   42
+Compute Bound vs Memory Bound
+Compute Bound: The bottleneck is the processing speed (FLOP/s) of TPU. The kernel is limited by how
+fast it can perform calculations.
+
+
+
+
+Memory Bound:The bottleneck is memory access (latency LL or bandwidth BB). The processor spends
+time idle, waiting for data to be transferred.
+
+
+
+
+Ideal scenario: The goal is achieved when the program is compute-bound, meaning the hardware is fully
+utilized and the runtime is dominated by total required FLOPs divided by FLOP/s.
+
+
+                                                                                                        43
+Pallas Compilation Path: An Overview
+                                                                                                                                          LLO
+   JAX and Pallas                                                            HLO                                       0x69     :    { %20 = vtrace 2147483648    ;;
+
+
+      Kernel                                       %pallas_kernel = f32[3,7]{1,0:T(4,128)} custom-call(%Arg_0.1,
+                                                   %Arg_1.2),
+                                                                                                                       %11 = compiler-scheduling-barrier
+                                                                                                                       = compiler-scheduling-barrier      ;;
+                                                                                                                                                                ;;
+                                                                                                                                                                %14 =
+                                                                                                                                                                      %13
+
+                                                                                                                                                                            XLA:LLO
+                                                                                                                                                                                      LLO Bundle
+                                             JAX
+                                                                                                                                                                                                                      ISA
+                                                                                                                       compiler-scheduling-barrier       ;;   %16 =
+                                                       custom_call_target="tpu_custom_call",
+                                                                                                             XLA:TPU   compiler-scheduling-barrier } /* Start/End                     multiple instructions for the
+def matmul_kernel(x_ref, y_ref, z_ref):                operand_layout_constraints={f32[3,5]{1,0}, f32[5,7]{1,0}},
+  @pl.when(pl.program_id(2) == 0)                                                                                      empty region 9 :: Start/End empty region 10                          same TPU cycle
+  def _():
+                                                       backend_config={"custom_call_config": {
+                                                                                                                       :: Start/End empty region 11 :: Start
+    z_ref[...] = jnp.zeros_like(z_ref)                     "body": "TUzvUgFNTElSZ29vZ2xlMy... <base64
+                                                                                                                       region 12 :: Start region 181 :: End region
+ z_ref[...] += x_ref[...] @ y_ref[...]             encoding>",                                                         181 */
+                                                            "serialization_format": 1,                                  0x6a     :    { %18 =inlined_call %s9_s0,
+def matmul(
+    x: jax.Array,                                           "needs_layout_passes": true                                %s10_s1, %s8_s2 /* %matmul_pallas =
+    y: jax.Array,
+                                                     }}                                                                custom-call(%Arg_0.1, %Arg_1.2) */
+                                                                                                                                                        ;;           %17
+    *,
+    bm: int = 128,                                                                                                     = compiler-scheduling-barrier }
+    bk: int = 128,
+    bn: int = 128,
+):                                                                                     Decode
+  m, k = x.shape
+  _, n = y.shape
+  return pl.pallas_call(
+      matmul_kernel,
+      out_shape=jax.ShapeDtypeStruct((m,
+n), x.dtype),
+                                                                        Mosaic IR
+                                                                     A dialect of MLIR
+                                                                                                                                          LLO
+      in_specs=[pl.BlockSpec((bm, bk),
+lambda i, j, k: (i, k)),
+                pl.BlockSpec((bk, bn),                    module @_matmul_pallas_kernel{
+lambda i, j, k: (k, j))],                                  func.func @main(%arg0: i32, %arg1: i32, %arg2:
+      out_specs=pl.BlockSpec((bm, bn),
+lambda i, j, k: (i, j)),                                  i32, %arg3: memref<512x1024xbf16,
+                                                                                                                       module @_matmul_pallas_kernel{
+      grid=(m // bm, n // bn, k // bk),                   #tpu.memory_space
+                                                                          <vmem>>, %arg4:
+                                                                                                                        func.func @main(%arg0: i32 {llo.type =
+compiler_params=pltpu.TPUCompilerParams(                  memref<1024x1024xbf16, #tpu.memory_space
+                                                                                                 <vmem>>,    Mosaic    i32}, %arg1: i32 {llo.type =i32}, %arg2:
+          dimension_semantics=("parallel",                %arg5: memref<512x1024xbf16,
+"parallel", "arbitrary")),                                                                                             i32 {llo.type =i32}, %arg3: i32
+  )(x, y)                                                 #tpu.memory_space
+                                                                          <vmem>>, %arg6:
+                                                                                                                       {llo.layout =
+                                                          memref<512x1024xf32, #tpu.memory_space
+                                                                                               <vmem>>)
+                                                                                                                       #tpu.tiled<(8,128)(2,1),[8,1]>, llo.type =
+                                                          attributes {dimension_semantics =
+                                                                                                                       memref<512x1024xbf16,
+                                                          [#tpu.dimension_semantics
+                                                                                 <parallel>,
+                                                                                                                       #tpu.tiled<(8,128)(2,1),[8,1]>,
+                                                          #tpu.dimension_semantics
+                                                                                <parallel>,
+                                                                                                                       #tpu.memory_space
+                                                                                                                                       <vmem>>}, %arg4:i32
+                                                          #tpu.dimension_semantics
+                                                                                <arbitrary>],
+                                                                                                                       {llo.layout =
+                                                          iteration_bounds = array<
+                                                                                 i64: 16, 8, 8>,
+                                                                                                                       #tpu.tiled<(8,128)(2,1),[8,1]>, llo.type =
+                                                          scalar_prefetch =0 : i64, scratch_operands =1 :
+                                                                                                                       memref<1024x1024xbf16,
+                                                          i64, window_params = [{transform_indices =
+                                                                                                                       #tpu.tiled<(8,128)(2,1),[8,1]>,
+                                                          @transform_0
+                                                                     , window_bounds = array<
+                                                                                           i64: 512,
+                                                                                                                       #tpu.memory_space
+                                                                                                                                       <vmem>>}
+                                                          1024>}, {transform_indices =
+                                                                                     @transform_1
+                                                                                                ,
+                                                          window_bounds = array<
+                                                                              i64: 1024, 1024>},
+                                                          {transform_indices =@transform_2
+                                                                                         , window_bounds =
+                                                          array<i64: 512, 1024>}]} {                                                                                                                                        44
+Tuning Pallas Kernels: The Critical Impact of Tile Size
+Performance Comparison: Small vs. Optimized Tiles: Using the matrix size 4096×7168×18432 (Total
+work: 1.087 TFLOPs), we see a dramatic difference in performance based on tile selection:
+ ● IronwoodFish : Peak FLOP Rate per TensorCore = 1028.75 TFLOP/s
+
+                                                                 Achieved        FLOPs                         Kernel
+ Run                   Tile Size                   Matmul Time   TFLOP/s         Utilization     Pallas Gird   invocations
+ Run 1 (Sub-Optimal)   bm=512, bk=512, bn=512      4.63 ms       233.6 TFLOP/s           22.72% (8, 36, 14)            4032
+ Run 2 (Optimized)     bm=1024, bk=1024, bn=1024   1.68 ms       644.6 TFLOP/s           62.70% (4, 18, 7)              504
+
+
+
+  ●    The change in tile size alone resulted in the kernel running 2.75 times faster
+  ●    The primary goal of Pallas tuning is to minimize instruction overhead by making the execution
+       grid as small as possible. This is achieved through the continuous process of finding the largest
+       possible tile sizes (bm,bn,bk) that can fully saturate the TensorCore′s VMEM capacity, ultimately
+       pushing FLOPs utilization closer to the physical limits of the processor.
+
+(4096, 7168) @ (7168, 18432)                                                                                                  45
+Fusion: The Core Concept
+Fusion: Fusion combines multiple sequential operations (e.g., Matmul → ReLU → Add) into a single
+unified kernel launch. Instead of treating each operation as a separate task, the accelerator processes
+the entire chain in one pass.
+
+Breaking the Memory Wall: In a non-fused sequence, every op must read inputs from HBM and write
+intermediate results back to it. For element-wise operations like ReLU, the time spent moving data
+across the "memory wall" often exceeds the time spent on actual computation.
+
+The Cost of "Round-trips": Without fusion, a Matmul followed by an Activation requires a full
+round-trip to memory. Even if the Matmul is extremely fast, the subsequent read/write of the large Z
+matrix forces the hardware to idle, wasting significant energy and throughput.
+
+
+
+
+                                                                                                          46
+Fused Activation Function in the Kernel
+VMEM as Local Accumulator: The z_ref buffer maintains data
+residency within VMEM. By keeping the intermediate matrix
+product local, the system avoids the "memory wall" associated
+with constant HBM round-trips.
+
+In-Place Execution: Once the accumulation is finished, the
+activation function runs in-place directly on the final block
+inside VMEM. This ensures that the activation result overwrites
+the temporary data without requiring additional memory
+allocation.
+
+Single Write-Back: Efficiency is maximized because only one
+final write-back to HBM occurs. By executing the entire chain
+(Matmul + Activation) before moving data to main memory,
+you significantly reduce HBM bandwidth consumption and
+kernel latency.
+                                                                  47
+Manual Pipelining: The Overlap Advantage
+Pallas's pallas_call automatically overlaps data transfer with computation, but manual Direct
+Memory Access (DMA) is sometimes required to achieve absolute peak hardware utilization
+
+ ●   Explicit Timing Control: Manual DMA gives the programmer control over when the next
+     load starts. We can use pl.make_async_copy(...) to trigger the next block load immediately
+     after heavy compute begins, achieving the maximal essential overlap.
+ ●   Deeper Pipelining: Allows for complex circular buffer schemes (e.g., three or four slots) and
+     non-standard tiling, which exceed the capabilities of the automatic double-buffering from
+     pallas_call
+ ●   Guaranteed Locality: Provides full control over VMEM buffers to prevent premature
+     eviction, ensuring blocks remain resident to keep the kernel running at peak FLOPs
+     utilization.
+
+
+
+                                                                                                     48
+Customizing the pallas_call Signature
+
+To transition from automatic to manual DMA, the structure of the pl.pallas_call must be
+modified to pass high-level HBM references and scratch buffers into the kernel.
+
+
+
+                                                      This allows a non-array scalar, the buffer_index, to
+                                                      be passed into the kernel via SMEM(Scalar
+                                                      Memory), controlling the alternating buffers
+
+                                                      The kernel receives HBM pointers
+                                                      (x_hbm_ref,y_hbm_ref) and must manually slice the
+                                                      data using Pallas's pl.ds(start, size) function
+
+                                                      Double Buffering VMEM: The key is allocating two
+                                                      spaces for both X and Y blocks within the
+                                                      scratch_shapes argument of pl.pallas_call
+
+
+                                                                                                             49
+Sequential DMA: The Cost of No Pipelining
+No Overlap: The core issue is the immediate
+synchronization: copy.start() is followed directly by
+copy.wait()
+
+Forced Idle: The processor (MXU) is forced to idle for
+the entire duration of the slow HBM data transfer.
+
+Memory-Bound: This wasted time confirms the
+operation is severely Memory-Bound, as the MXU is
+always waiting for the memory pipe.
+
+Low Utilization: The result is extremely low efficiency
+(23.4%), wasting 76% of the core's compute potential.
+ ●   (4096, 7168) @ (7168, 18432) with (1024, 1024, 1024) tiles
+
+
+
+                                                                  50
+Overlapping I/O and Compute
+1. Trigger Next Copy: copy_next.start() is executed early in the
+loop to initiate the load for the next block into the other buffer,
+maximizing the overlap window.
+
+2. Wait for Current Block: copy_x.wait() and copy_y.wait()
+forces the MXU to pause only if the DMA has not yet finished
+loading the current block.
+
+3. Compute Phase: jnp.matmul() executes on the ready
+buffer's data, which is now guaranteed to be local, while the
+DMA engine works in the background.
+
+4. Final Write-Back: The output out_ref (the accumulator) is
+only written from VMEM to HBM once at the very end of the 3D
+loop, maintaining high FLOPs intensity.
+                                                                      51
+Explicit Pipelining
+Implicit Pipelining (pl.pallas_call)
+ ● Automated I/O Boundaries: Manages HBM ↔ VMEM
+     transfers automatically at kernel entry and exit,
+     ensuring data is resident before compute starts.
+ ● Managed Synchronization: Simplifies the "Load →
+     Compute → Store" lifecycle by handling all DMA
+     "wait" signals and buffer state transitions behind the
+     scenes.
+Explicit Pipelining (pltpu.emit_pipeline)
+ ● Granular Internal Control: Moves orchestration
+     inside the kernel body, allowing you to manually
+     trigger asynchronous memory moves while
+     computation is active.
+ ● Custom Overlap Strategies: Enables advanced
+     Software Pipelining (like double-buffering), letting you
+     pre-fetch "Tile N+1" while the hardware is still
+     processing "Tile N."
+                                                                52
+Flash Attention - Pallas Kernel
+
+
+
+                                  53
+Tokamax
+●   Tokamax is a library of custom accelerator kernels, supporting both NVIDIA
+    GPUs and Google TPUs.
+●   Tokamax provides state-of-the-art custom kernel implementations built on
+    top of JAX and Pallas.
+●   Tokamax also provides tooling for users to build and autotune their own
+    custom accelerator kernels.
+
+●   https://github.com/openxla/tokamax
+●   https://github.com/openxla/tokamax/tree/main/tokamax/_src/ops/experimental/tpu/splash_attention
+●   https://github.com/vllm-project/tpu-inference/tree/main/tpu_inference/kernels
+●   https://github.com/vllm-project/tpu-inference/tree/main/tpu_inference/kernels/ragged_paged_att
+    ention/v3
+
+
+
+                                                                                                      54
+Recap: Simple Attention Mechanism
+●   Core Mechanism: Attention weighs input parts,
+    enabling models to focus on relevant information by
+    computing a weighted sum.
+     ○ O = softmax(QKᵀ / √dₖ) V                                 Simple Example:
+                                                                8 tokens
+           ■ Q = Query, K = Key, V = Value,
+           ■ dₖ = Key dimension, O = Output
+●   Causal Masking: Causal masks are applied to QKᵀ in
+    decoders to prevent attending to future tokens, before
+    the softmax function.
+     ○ If mask[i, j] = 0, then (QKᵀ)[i, j] = -∞
+     ○ Where i is the query position and j is the key pos.
+●   Regularization: Dropout (p) for regularization is applied
+    to the softmax output before multiplying by V.
+     ○ O = dropout(softmax(QKᵀ / √dₖ), p) V
+                                                                                  55
+Attention FLOPS
+Model Params:
+     ● Batch Size: 8, Seq Length: 4096, Heads: 128
+     ● Query/Key head dim = 192, Value Dim = 128
+
+Attention Flops:
+      ● QKT = 2×8×128×4096×192×4096 = 6.59 TFLOPs
+      ● (Q×KT)×V = 2×8×128×4096×4096×128 = 4.39 TFLOPs
+      ● Softmax Can be ignored (tiny FLOPS)
+      ● Total = 6.59 + 4.39 = 10.98 TFLOPs
+
+Ironwood : Peak FLOP Rate per TensorCore = 1028.75 TFLOP/s
+
+
+
+
+                                                             56
+Custom Kernels - Motivation
+The Bottleneck: Standard attention is stalled by HBM
+bottlenecks; moving the massive NxN matrix for Softmax and
+Dropout creates a "memory wall" that limits performance in long
+sequences.
+
+The Solution: Custom kernels use Tiling and Fusion to keep
+intermediate scores in VMEM. By processing the Scale →
+Softmax → V-Product chain in a single pass, the full NxN matrix is
+never written back to slow HBM.
+
+
+
+
+                                                                     57
+XLA Compiler Fusions For Attention
+Fusion                          Description                       Inputs                       Key Outputs & Shapes
+                                Computes Q⋅K^T and M.
+                                                                                               M(Max-Logits): [128,4096],
+                                Calculates the raw similarity
+                                                                                               L (Logits) [128, 4096, 4096]
+                                scores (L), applies the attention
+                                mask, and determines the                                       Total Time Avg: 3.34 ms
+Fusion 1: Logits & Max-Logits   Max-Logits vector (M) across the Q,K [128,4096,192],           FLOPS Utilization: 24.10%
+(%select_reduce_fusion)         sequence length.                  Mask [4096,4096]             HBM bandwidth utilization: 76.23%
+
+                                Computes Lsum. Stabilizes the
+                                                                                               Lsum (Sum of Exponentials): [128,4096]
+                                masked logits (Lmasked−M),
+                                computes the exponential, and    L (Logits) [128,4096,4096],   Total Time Avg: 3.29ms
+Fusion 2: Softmax Denominator   performs a sum-reduction to find M (Max-Logits) [128,4096],    FLOPS Utilization: 0.19%
+(%fusion.2)                     the Softmax Denominator (Lsum). Mask [4096,4096]               HBM bandwidth utilization: 70.82%
+
+                                Computes P and O. Re-calculates
+                                                                                               P (Probability Matrix): [128,4096,4096]
+                                the stable numerator, divides by
+                                                                                               O (Attention Output): [128,4096,192]
+                                the denominator (Lsum) to get    L [128,4096,4096],
+                                the Probability Matrix (P), and  V [128,4096,192],             Total Time Avg: 3.68 ms
+Fusion 3: Softmax & Output      performs the final dot product   M [128,4096],                 FLOPS Utilization: 21.97%
+(ROOT %fusion)                  P⋅V to get the output.           Lsum [128,4096]               HBM bandwidth utilization: 69.3%
+
+
+
+
+                                                                                                                                         58
+Custom Kernels: Why XLA's Fusions Aren't Enough for Peak Performance
+●   Materializing the Attention Matrix: XLA's multi-kernel approach must write the full,
+    quadratically-sized Logit and Probability matrices (O(S^2) > 8GB) to High Bandwidth
+    Memory (HBM). This consumes vast amounts of memory bandwidth for temporary data.
+
+●   Multiple HBM Round Trips (Logits, Probabilities): Because the Softmax is split across
+    Fusions 1, 2, and 3, the massive Logit and Probability matrices are written to HBM and then
+    immediately read back for the next step. These multiple read/write cycles are slow and
+    bandwidth-intensive
+
+●   Storing M, L_sum to HBM: Even the smaller normalization vectors (Max-Logits (M) and
+    Sum of Exponentials (L_sum) are unnecessarily written to HBM after being computed and
+    then read back by the final kernel, instead of being kept entirely on-chip.
+
+
+
+                                                                                                  59
+ Attention Challenges
+Quadratic Scaling: Standard self-attention requires storing the full NxN
+attention score matrix S. Because memory usage grows quadratically with
+sequence length, long sequences quickly exceed available hardware              https://arxiv.org/abs/2205.14135
+capacity.
+
+The HBM Wall: High-bandwidth memory (HBM) is significantly slower than
+on-chip SRAM (VMEM). Repeatedly reading and writing the massive S
+matrix creates a "memory wall" that stalls the compute units.
+
+The Flash Solution: Flash Attention eliminates this by never "materializing"
+the full NxN matrix in HBM. Instead, it uses tiling to compute the attention
+output in small blocks that fit entirely within fast on-chip memory.
+
+
+
+
+                                                                                                            60
+Online Softmax
+●   Softmax:
+     ○ The softmax function normalizes a vector of
+         scores into a probability distribution.
+     ○ A numerically stable implementation (safe
+         softmax) is used to prevent overflow.
+●   Online Softmax:
+     ○ Online softmax is used to process data in blocks
+     ○ Each block does a local safe softmax calculation.
+     ○ It tracks a shared maximum and adjusts results
+         to ensure accuracy across all tiles.
+     ○ Online softmax reduces memory usage and
+         enables faster parallel processing.
+
+                                                           61
+Minimizing HBM Access: The Core of Flash Attention
+Bypasses the O(N^2) Memory Wall: Avoids storing the massive
+NxN attention matrix in HBM, eliminating the quadratic memory
+bottleneck that limits sequence length.
+
+Fused Kernel Operations: Combines score calculation, softmax,
+and value aggregation into a single pass, drastically reducing slow
+data transfers between HBM and SRAM.
+
+Tiled VMEM Processing: Breaks Q, K, and V into small blocks
+that fit entirely within high-speed local memory (VMEM),
+maximizing hardware utilization and throughput.
+
+IO-Aware Optimization: Prioritizes reducing memory traffic over
+raw calculation counts, delivering significant speedups by
+focusing on the real hardware bottleneck: data movement.
+
+Picture Credit: https://insujang.github.io/2024-01-21/flash-attention/
+                                                                         62
+ Blockwise Online Softmax
+Iterative Tiling over K/V Blocks: For every Query (Q) block, the
+kernel iterates through all Key (K) and Value (V) blocks. This allows
+the TPU to compute attention scores in small, manageable strips
+that fit entirely within high-speed VMEM.
+
+Dynamic Online Softmax: Each tile performs a local "safe softmax"
+while maintaining a running maximum (m) and sum-of-exponents (l).
+This incremental approach eliminates the need to materialize the full
+NxN attention matrix in HBM.
+
+Running Output Correction: As new K/V blocks are processed, the
+previous partial output (O) is rescaled and adjusted to align with the
+updated running statistics. This ensures the final weighted sum is
+mathematically identical to standard softmax.
+
+                                                                         63
+Flash Attention Summary
+Flash Attention fuses attention operations and processes data in blocks, iteratively updating running
+statistics (L and M) to accurately compute the final output O without storing the full attention matrix in HBM.
+
+
+
+
+                                                                                                                  64
+65
+Flash Attention: Key Ops and Delayed Normalization
+Dynamic Scaling (alpha): The core mechanism is the Alpha factor,
+calculated as exp(m_prev - m_next). This term tracks the change in
+the maximum logit (M) across blocks, ensuring numerical stability.
+
+Re-scales Accumulation: This alpha factor is applied directly to the
+previous accumulated sums (l_prev, o_ref) before adding the current
+block's output. This accurately re-scales all past results relative to the
+new exponent reference point.
+
+Additive Updates: Within the main loop, the partial results (l_curr,
+o_curr) are added to the running totals using only fast multiplication
+and addition operations.
+
+Delayed Normalization: The final, slow division operation
+(normalization by L) is intentionally skipped in every block and
+executed only once at the very end of the loop, which drastically
+boosts accelerator throughput.
+                                                                             66
+ Multi-Head Attention
+Subspace Parallelism: Projects Q, K, and V into multiple independent
+heads, allowing the model to attend to different representation
+subspaces (e.g., syntax vs. semantics) simultaneously.
+
+Massive Scaling: Independent heads compute attention in parallel;
+DeepSeek-V3 utilizes 128 heads to capture intricate,
+high-dimensional dependencies across sequences.
+
+Integration & Projection: Head outputs are concatenated and
+passed through a final linear projection, fusing diverse contextual
+                                                                         ●    Query (q): bf16[8,128,4096,192]
+insights into a single unified vector.                                   ●    Key (k): bf16[8,128,4096,192]
+                                                                         ●    Value (v): bf16[8,128,4096,128]
+Rich Dependency Modeling: By diversifying the focus of each head,        ●    Output (o): f32[8,2048,128]
+MHA provides significantly higher modeling capacity than a
+single-headed attention mechanism.                                     Batch Size: 8, Seq Length: 4096
+                                                                       Attention Heads: 128
+                                                                       Query/Key head dim: 192, Value Dim: 128
+
+                                                                                                                 67
+ Grouped Query Attention
+Optimized Head Sharing: Multiple query heads share a single set of Key (K) and
+Value (V) projections, serving as a high-performance middle ground between
+Multi-Head and Multi-Query Attention.
+
+Reduced Memory Footprint: Significantly lowers the KV cache storage
+requirements in HBM by only computing and storing one set of KV pairs per
+group.
+
+Enhanced Throughput: Decreases memory bandwidth pressure during
+inference, enabling larger batch sizes and much longer sequence processing
+without hitting the "memory wall."
+
+Parameter Efficiency: Maintains high modeling capacity while reducing
+redundant projections, allowing for more efficient hardware utilization on TPUs
+
+                                                                                  68
+MultiHead Attention (JAX Code)
+
+
+
+
+                                 69
+     Multi-Head Attention
+                                 Grid (0, 0, 0)
+
+
+1.   Blockwise compute,
+     maximum stabilization.
+2.   Update global max (m)
+     and sum (l).
+3.   Merge outputs using
+     exponential scaling.
+
+
+
+
+1.   Grid schedules kernel
+     iterations (heads,
+     seq_len/br, seq_len/bc)         Grid (0, 0, 1)
+2.   Input specs tile Q, K and
+     V into blocks.
+3.   Output specs
+     accumulate L, M, and
+     write O
+
+
+
+br = 1024, bc = 2048
+grid = (128, 4096/1024, 4096/2048)
+grid = (128, 4, 2)                                    70
+Multi-Head Attention MFU
+●   Attention FLOPS q/k [128, 4096, 192] and v[128, 4096, 128]
+     ○   FLOPs_Q K^T= 2 x 4096 x 192 x 4096 = 6.43 TFLOPs
+     ○   FLOPs_SV = 2 x 4096 x 4096 x 128 = 4.30 TFLOPs
+     ○   Total FLOPs = 128 x (FLOPs_Q K^T + FLOPs_SV) = 1373.4 TFLOPs
+●   MFU Utilization
+     ○   Execution Time = 4 ms
+     ○   Achieved FLOPs/s = Total FLOPs/Execution Time = 1373.4/4 = 343.35 TFLOPSs/s
+     ○   Ironwood Peak FLOP Rate per TensorCore: 1028.75 TFLOP/s
+     ○   MFU Utilization = (342.5/1028.75) x 100% = 33.29%
+
+
+
+
+                                                                                       71
+Pacchetto - Debugging Pallas Kernels
+LLO Bundle Visualizer: A high-fidelity tool designed to analyze Low-Level Optimizer (LLO) bundles. It
+maps complex TPU instructions onto the Perfetto trace viewer, providing a granular timeline of kernel
+execution.
+Hardware-Level Insights: Visualizes the precise utilization of the TensorCore, specifically tracking the
+activity of the MXU (Matrix Multiply Unit) and VPU. It allows developers to see exactly when compute
+units are idling or stalled.
+Memory & Register Analysis: Tracks data flow across the TPU memory hierarchy and monitors register
+pressure. This is critical for identifying "spills" or inefficient memory movement that can degrade
+performance.
+Kernel Bottleneck Detection: A vital tool for optimizing complex, hand-written kernels like
+FlashAttention or GMM. It helps engineers identify if a kernel is compute-bound (MXU limited) or
+memory-bound (HBM/VMEM bandwidth limited).
+
+
+
+                                                                                                           72
+Pacchetto Trace Structure
+This trace visualizes the three main execution engines on
+the accelerator chip and their maximum capacity (the scale
+on the left axis).
+
+                                                         Maximum
+                      Functional Unit                    Capacity
+Trace Section         (FU)              Key Instructions (Example Scale)   Notes
+                                                                           Softmax & Activation: Performs all element-wise
+                      Vector/Scalar Unit vmax, vpack,                      math, non-linear functions (ReLU, exp), and data
+ALU (Top)             (XLU)              vadd, vmov      ≈350 OPC          formatting.
+
+                                       vmatmul,
+                     Matrix Unit (MXU) vmatprep, vpop,                     Core Computation: Executes the high-throughput
+MXU/XLU/EUP (Middle) & Control Pipes   vmatpush          ≈400 OPC          QK^T and SV matrix multiplications.
+                      Load/Store Unit                                      Memory I/O: Transfers data between on-chip
+VLD/VST (Bottom)      (LSU)             vld, vst         -                 memory (VMEM) and the register file.
+
+
+
+                                                                                                                              73
+Reading Pipelining and Parallelism
+The most critical information in the trace is how the compiler hides latency by overlapping the three
+execution phases across cycles.
+Trace Feature                   Interpretation                                   Performance Insight
+                                                                                 Example: vmatmul.mxu0 and vmatmul.mxu1 running
+                                Instructions scheduled horizontally within a     concurrently means the single Matrix operation is split and
+                                narrow time slice (a "packet" or "bundle")       executed simultaneously across the accelerator's two
+Instruction-Level Parallelism   execute in the same clock cycle.                 MXUs.
+                                Producer-Consumer Handshake: A vpop
+                                instruction (MXU finish) is immediately followed Softmax Fusion: The ALU starts processing the first tiles of
+                                or overlapped by a vmax or vpack instruction     the QK^T matrix (e.g., finding Mcurr) before the MXU has
+MXU → ALU Pipelining            (ALU start).                                     even finished calculating the entire matrix.
+                                Overlapping Operations: vmatprep and             Sustained Throughput: The MXU's input buffers are
+                                vmatpush (setup for the next vmatmul) are        continuously replenished, ensuring that when the
+                                scheduled while the current vmatmul is           vmatmul instruction finishes, the hardware can
+Latency Hiding (Setup)          running.                                         immediately launch the next one without stalling.
+                                Input/Output Bandwidth: High density of vld
+                                (Load) operations before the vmatmul and
+                                dense vst (Store) operations after the vmax      Memory Bottleneck Detection: If the compute bars drop
+                                show memory access is closely managed to         or become sparse due to a cluster of VLDs or VSTs, it
+Vertical Alignment (VLD/VST)    feed the compute units.                          suggests a memory bandwidth bottleneck.                        74
+ Multi-Head Attention - Pacchetto Trace
+Despite achieving high MXU compute saturation and successful pipeline fusion, the program is critically
+memory bound due to extreme Vector Register Pressure that forces frequent, latency-inducing
+VSTORE.SPILL activity and intermittent I/O stalls
+
+
+
+
+                                                                                                          75
+Performance Bottleneck Observations from Trace
+Sporadic MXU Stalls: The Matrix Multiply Unit shows high-frequency idling, signaling data
+starvation where the compute engine is consistently waiting on the pipeline.
+
+Saturated Register Pressure: Vector registers are at 100% capacity, triggering constant,
+expensive VSTORE.SPILL operations to offload data and free up register space.
+
+Memory-Bound Fragmentation: Disjointed VLOAD/VSTORE activity confirms the kernel is
+bound by HBM bandwidth, with compute units stalled during data transfers.
+
+Inefficient Compute Overlap: Intermittent VALU activity indicates that vector math (like
+Softmax) is failing to hide behind the MXU's matrix operations.
+
+Low Sustained MFU: The profile lacks a "steady state," showing high-peak bursts rather than
+the sustained utilization required for high Model FLOPs Utilization.
+
+
+                                                                                              76
+Tuning Block Sizes for Peak MXU Sustained Utilization
+
+ ●    Optimal Block Size Search: Systematically test and profile the largest
+      possible br, bc values that fit within VMEM to maximize the
+      compute-to-load ratio and sustain the MXU.
+
+ Multi-Head Attention Q/K: [128, 4096, 192] and V: [128, 4096, 128]
+ Peak FLOP Rate per Ironwood TensorCore: 1028.75 TFLOP/s
+                                        Execution Time
+ Block Sizes (br,bc)   Grid             (ms)                Achieved TFLOPs/s       MFU Utilization
+ 1024, 2048            (128, 4, 2)                   4.03                  343.35                     33.37%
+ 2048, 2048            (128, 2, 2)                   3.36                  408.75                     39.73%
+ 4096, 4096                             N/A                 N/A                       Memory Limit Exceeded
+
+
+
+  Increasing the Query block size (br) from 1024 to 2048 (Scenario 1 to 2) resulted in a
+  significant 19% performance gain (343.35 to 408.75 TFLOPs/s), demonstrating that the kernel
+                                                                                                               77
+  was indeed Q-block size limited.
+ Pallas Block Tiling & MXU Configuration                                                                                                                                                                                                      V [4096, 128]
+
+
+                                                                                                                                                                                                                                                    [2048, 128]
+                                                                                                                                                                                             K [192, 4096]
+
+      ●          Pallas Block: The kernel processes a Query block Q∈[1024,192]
+                 and a Key block K∈[2048,192]. The inner loop iterates over 8                                                                                                                [192, 2048]    [192, 2048]
+                                                                                                                                                                                                                                                    [2048, 128]
+
+
+                 blocks of K (j=0 to 7).
+      ●          MXU Unit: Ironwood uses DUAL [256,256][256, 256] MXUs                                                                                                        [1024, 192]    [1024, 2048]                                          [1024, 128]
+
+
+      ●          Dual MXU Parallelism (Row-Based): The 32 output tiles are split                                                                                              [1024, 192]
+                                                                                                                                                                                                                           l [1024,1] m[1024,1]
+                                                                                                                                                                                                                                                   [1024, 128]
+
+
+                 by Q rows (16 tiles/MXU) to ensure balance and data locality:                                                                                                [1024, 192]                                                          [1024, 128]
+
+
+                  ○ MXU 0: Handles the top 512 rows of Q                                                                                                                      [1024, 192]                                                          [1024, 128]
+
+
+                  ○ MXU 1: Handles the bottom 512 rows of Q                                                                                                                 Q [4096, 192]        P [4096, 4096]                                   O [4096, 128]
+
+
+
+
+                                                                        KT                                                                                                               QKT
+     Q
+                      [192, 256]   [192, 256]   [192, 256]     [192, 256]    [192, 256]   [192, 256]   [192, 256]   [192, 256]       [192, 256]   [192, 256]   [192, 256]      [192, 256]    [192, 256]      [192, 256]        [192, 256]           [192, 256]
+   [256, 192]
+
+
+
+
+    [256, 192]                                                 MXU0                                                                  [192, 256]   [192, 256]   [192, 256]      [192, 256]    [192, 256]      [192, 256]        [192, 256]            [192, 256]
+
+
+
+                 @                                                                                                               =
+   [256, 192]                                                                                                                        [192, 256]   [192, 256]   [192, 256]       [192, 256]   [192, 256]       [192, 256]       [192, 256]            [192, 256]
+
+
+                                                               MXU1
+   [256, 192]                                                                                                                        [192, 256]   [192, 256]   [192, 256]      [192, 256]    [192, 256]       [192, 256]       [192, 256]            [192, 256]
+
+
+
+
+[1024, 192]                                                  [192, 2048]                                                                                                      [1024, 2048]                                                                    78
+MXU Data Alignment & Implicit Zero Padding
+The LLO implicitly pads the Q and K 192-dimension to the required 256 size. K (Gain Register):
+K^T uses ≈ 48 explicit vmatpush instructions. The remaining ¼ set to zero by vmatprep (implicit
+zeroing), saving 16 redundant push operations.
+                            Q                                                                 KT                                                           QKT
+
+                                                                                       [192, 256]
+               [256, 192]                                      @                                                                  =                 [256, 256]
+
+        vector matrix multiply (vmatmul): Pushes a chunk               Gain Matrix Register (GMR): MXU register file that                  matrix result (vpop mrf): Pops a chunk from MRF
+        of data to multiply (LHS) into the MXU. This                   holds the gain matrix [256, 256] - resulting in 32x2 =              into a vector register
+        produces a result chunk and stores it in MRF.                  64 vmatpush instructions
+
+
+                 [8, 128]                 [8, 128]                                [8, 128]                    [8, 128]                              [8, 128]                 [8, 128]
+
+                 [8, 128]                 [8, 128]                                [8, 128]                    [8, 128]
+
+                  .                        .                                       .                           .
+                  .                        .                                       .                           .
+                  .                        .                                       .                           .
+
+                 [8, 128]                 [8, 128]                                [8, 128]                    [8, 128]
+
+                 [8, 128]                       Zeros
+                                          [8, 128]         STREAMING              [8, 128]                    [8, 128]
+
+                 [8, 128]                 [8, 128]                                [8, 128]                    [8, 128]            =
+                 [8, 128]                 [8, 128]                                [8, 128]                    [8, 128]
+
+                  .                        .                                       .                           .
+                  .                        .                                       .                           .
+                  .                        .                                       .                           .
+
+                 [8, 128]
+
+                 [8, 128]
+                                          [8, 128]
+
+                                          [8, 128]
+                                                                                  [8, 128]
+
+                                                                                  [8, 128]
+                                                                                             Zeros            [8, 128]
+
+                                                                                                              [8, 128]
+                                                           256, 256                                                             256, 256                                                256, 256   79
+MXU/VALU Pipelining
+
+MXU/VALU pipelining achieves zero
+memory Softmax fusion by transferring
+matrix tiles directly via registers, completely
+bypassing slow VMEM access.
+
+
+Phase               Core Code Operation Hardware Unit         LLO Instruction Flow   Key Action & Fusion
+                                                                               QK Pipelining: VALU instantly consumes
+1. Softmax Numerator qk=QK^T → Mcurr,                         vmatmul→vpop→vma QK tiles to compute the max/exp terms
+Prep                 Scurr                MXU → VALU/XLU      x→vsub/vexp      (M, S).
+                                                                               Critical Fusion: L-term update is pure
+                    α=exp(Mprev−Mnext)                                         vector/scalar math, running completely
+2. L-Term Update    →                                         vsub→vexp→vmul→v on the VALU concurrently with the main
+(Scalar)            lnext=lcurr+α∗lprev   VALU/XLU (+SALU)    add              MXU/IO flow.
+                                                                                SV Pipelining: VALU output (S)
+                                                                                immediately feeds the MXU for the
+3. Output           Ocurr=Scurr⋅V →                           vpack→vmatmul→vpo second matrix multiply (SV), and the
+Accumulation        Oref.update(⋅)        VALU → MXU → VALU   p→vmul→vadd       result is accumulated by the VALU.
+                                                                                                                        80
+Named Scopes and implicit barriers
+  Named scopes confirmed three distinct, non-overlapping execution
+  phases because the huge intermediate qk^T matrix acts as a compulsory
+  synchronization point. This structure is an implicit barrier: the MXU must write
+  the entire matrix to slower VMEM, and the VALU must read it back before the
+  SV multiplication can commence.
+
+
+
+
+                                                                                     81
+Micro-Tiling: The Memory Locality Strategy                                                                                               V [4096, 128]
+
+
+                                                                                                                                               [2048, 128]
+                                                                                         K [192, 4096]
+
+
+Explicit Matrix Decomposition: Strategically breaks down massive                         [192, 2048]    [192, 2048]
+                                                                                                                                               [2048, 128]
+
+global operations (e.g., [1024, 2048]) into a series of smaller,
+iterative tiles (e.g., [1024, 1024]) to match the physical constraints
+of the hardware.                                                           [1024, 192]   [1024, 2048]
+
+                                                                                                                      l [1024,1] m[1024,1]
+                                                                                                                                               [1024, 128]
+
+
+                                                                           [1024, 192]                                                         [1024, 128]
+
+
+Register-File Optimization: Identifies the precise block size that         [1024, 192]                                                         [1024, 128]
+
+
+fits entirely within the processor's fastest on-chip registers,            [1024, 192]                                                         [1024, 128]
+
+
+ensuring data stays as close to the compute units as possible.           Q [4096, 192]      P [4096, 4096]                                   O [4096, 128]
+
+
+
+
+Elimination of Memory Spills: By keeping intermediate values in                                                                              V [4096, 128]
+
+registers, it prevents the system from triggering VSTORE.SPILL                                                                                  [2048, 128]
+operations—expensive transfers that offload data to slower memory                        K [192, 4096]
+
+
+when registers overflow.                                                                 [192, 2048]    [192, 2048]
+                                                                                                                                                [2048, 128]
+
+
+
+Zero-Stall Pipeline Fusion: Enables continuous saturation of the
+MXU and VALU by guaranteeing that the next set of operands is              [1024, 192]
+
+
+already staged in registers, effectively eliminating pipeline stalls.
+                                                                                                                      l [1024,1] m[1024,1]
+                                                                           [1024, 192]                                                         [1024, 128]
+
+
+                                                                           [1024, 192]                                                         [1024, 128]
+
+
+                                                                           [1024, 192]                                                         [1024, 128]
+                                                                                                                                                              82
+                                                                         Q [4096, 192]       P [4096, 4096]                                  O [4096, 128]
+Micro-tiling Pacchetto Trace
+●   Micro-tiling breaks the required QK^T block of [1024, 2048]
+    into two manageable [1024, 1024] ([1024, 192] @ [192, 1024]
+    chunks inside the kernel (based on bkv_compute=2).
+●   This sacrifices minimal loop overhead to gain the benefit of
+    eliminating memory stalls, as the smaller chunks now fit
+    entirely within the fast on-chip registers, achieving maximum
+    throughput (Remove named_scope while testing)
+
+
+
+
+                                                                    83
+Max Logit Estimate: Bypassing Vector Overhead
+The Max Logit Estimate MLE strategy skips complex pipeline steps
+by substituting a correct constant value for the m_next calculation.
+
+ ●    Bypasses Slow Reduction: The optimization skips the slow,
+      vector-intensive step of calculating the true maximum vmax in
+      each block.
+ ●    Substitutes Constant: We substitute the dynamically
+      calculated maximum m_max with a pre-determined, constant
+      max_logit_estimate
+ ●    Simplifies the Pipeline: This elimination removes complex
+      vector arithmetic operations vmax and jnp.maximum from the
+      critical path, allowing the compiler to generate simpler, faster
+      machine code.
+ ●    Achieves Faster Throughput: By simplifying the math, the
+      processor spends less time on control flow and vector
+      computation, achieving higher throughput.
+
+
+
+                                                                         84
+Flash Attention MFU: Logit Estimate Performance
+Multi-Head Attention Q/K: [128, 4096, 192] and V: [128, 4096, 128]
+Peak FLOP Rate per Ironwood TensorCore: 1028.75 TFLOP/s
+
+Block Sizes (br,bc)       Grid                 Execution Time (ms) Achieved TFLOPs/s            MFU Utilization
+1024, 2048                (128, 4, 2)                           4.03                   343.35                        33.37%
+2048, 2048                (128, 2, 2)                           3.36                   408.75                        39.73%
+2048, 2048 (MLE)          (128, 2, 2)                           2.64                   520.23                        50.27%
+4096, 4096                                     N/A                     N/A                             Memory Limit Exceeded
+
+
+
+
+               MXU
+
+
+
+
+                                                                                                                               85
+Flash Attention Optimization Summary
+  ●   Optimized I/O Block Sizes: Outer block dimensions (br, bc) are carefully selected and manually
+      tuned to maximize memory concurrency and the data transfer rate between slower HBM and
+      on-chip memory VMEM.
+  ●   Micro-Tiling for Register Locality: Matrix segments are subdivided (bc=2048 →
+      bkv_compute=1024) to guarantee intermediate data fits entirely within the fast on-chip registers.
+      This is a memory locality strategy that eliminates VSTORE.SPILL stalls.
+  ●   Zero-Memory Pipeline Fusion: The MXU and VALU achieve continuous operation by transferring
+      data tiles directly via registers. This handshake ensures co-saturation of both units and prevents
+      stalls associated with buffering massive intermediate matrices.
+  ●   Arithmetic Simplification (MLE): The Max Logit Estimate (MLE) optimization allows the kernel to
+      substitute a correct constant for the dynamic M term, entirely bypassing the expensive VALU
+      maximum vector reduction vmax instruction.
+  ●   Delayed Normalization & Dynamic Scaling: The full normalization (division) is deferred until the
+      final block. Instead, the alpha factor is calculated every block to dynamically re-scale previous
+      accumulated outputs (L, O), maintaining numerical stability using only fast multiplication and
+      addition.
+
+https://github.com/openxla/tokamax/tree/main/tokamax/_src/ops/experimental/tpu/splash_attention            86
+Splash Attention
+
+
+
+                   87
+Flash Attention - Recap
+Optimized I/O Tiling: Hand-tuned block sizes to maximize
+HBM-to-VMEM data transfer speeds.
+
+Micro-Tiling: Subdividing tiles to keep data in registers and
+eliminate memory spills.
+
+Pipeline Fusion: Direct register handshakes between MXU and
+VALU to prevent execution stalls.
+
+Arithmetic Simplification (MLE): Skipping expensive max-vector
+reductions using constant estimates.
+
+Delayed Normalization: Using per-block scaling instead of
+division for speed and stability.
+
+
+
+                                                                 88
+                                                                            Causal Mask, seq_length = 8
+Masks and Sparsity                                                          Bq = 2, Bkv = 2
+
+Causal & Local Constraints: Masks enforce architectural rules, such as       ●   Yellow - all zeros (no computation)
+Causal Masks in decoders to prevent "looking ahead" at future tokens, and    ●   Blue: Partial Mask
+                                                                             ●   Read: Full attention
+Local Attention Masks that restrict focus to a sliding window of
+neighboring context.
+
+Logical Sparsity: By zeroing out specific connections, masks transform
+dense attention into a sparse operation where the model only processes
+relevant scores, significantly reducing the theoretical workload.
+
+Computational Skipping: Hardware-aware kernels leverage this sparsity
+to bypass the calculation of masked regions entirely, saving both memory
+bandwidth and MXU cycles.
+
+Throughput Acceleration: Transforming masks into a sparse execution
+map allows the hardware to skip "empty" blocks, converting logical
+constraints into physical speedups and reduced power consumption.
+
+
+
+                                                                                                                       89
+Pre-Processing Mask Information
+ ●    Sparsity Pruning: The [4096, 4096] mask is divided into 4x2 blocks
+      ([1024, 2048]), and all inactive blocks are discarded, creating a compact
+      map of only 6 active blocks for computation.                                                    0
+                                                                                                              K        1
+ ●    Data Compression: The system analyzes the active blocks and efficiently
+                                                                                              1   0       0   0   0    0       0   0
+      finds that it only needs to store 2 unique raw mask patterns in memory              0
+      (partial_mask_blocks), drastically reducing memory usage.                               1   1       0   0   0    0       0   0
+ ●    Execution Map & Prefetching: The arrays (active_rows, mask_next) are                    1   1       1   0   0    0       0   0
+                                                                                          1
+      generated to explicitly map the computation order and tell the MXU which                1   1       1   1   0    0       0   0   Block Sizes [1024, 2048]
+      of the 2 unique patterns to prefetch for zero-latency application.              Q       1   1       1   1   1    0       0   0
+                                                                                                                                       Seq_length [4096]
+                                                                                                                                       Block Mask Shape: [4, 2]
+                                                                                          2
+Array Name            Value                     Notes                                         1   1       1   1   1    1       0   0
+                                                Tells the MXU if it needs a mask (1 =         1   1       1   1   1    1       1   0
+                                                                                          3
+Block Mask            [1 1 2 1 2 1 0 0]         Partial) or not (2 = Full).                   1   1       1   1   1    1       1   1
+active_rows
+Q-axis index          [0 1 2 2 3 3 0 0]         Active block row index                                                                  Partial masks
+                                                                                                      1                0                (2 unique pattern)
+active_cols
+                                                                                                                                        Shape: [2, 1024, 2048]
+KV-axis index         [0 0 0 1 0 1 0 0]         Active block col index
+                                                Contains the 2 unique raw mask
+                                                                                                      1                0
+partial_mask_blocks Shape (2,1024,2048)         patterns (Pattern 0 and Pattern 1).
+                                                Crucial: Tells the hardware which                 2                        1
+                                                of the 2 unique patterns to load
+mask_next             [0 1 0 0 1 1 0 0]         next for each active block.                       2                        1
+num_active_blocks                           6                                                                                                              90
+                                                                                                          Block Mask
+Sparse Execution
+Metadata Structures
+
+
+
+Block Filtering (block_mask): Categorizes QK blocks as zero, non-zero, or partial, allowing the kernel
+to skip empty regions and focus MXU cycles only on active data.
+Coordinate Mapping (active_rows/cols): Provides the hardware with precise (Q, KV)$grid indices to
+calculate exact memory addresses, ensuring efficient loading of active blocks from HBM.
+Mask Pipelining (mask_next): Stores indices that allow the MXU to prefetch the next required partial
+mask pattern with zero latency while the current computation is in flight.
+SMEM-Resident Metadata: Computed once per mask and stored in SMEM, these structures enable
+high-speed access to the sparse execution map without redundant HBM transfers.
+
+                                                                                                         91
+Tokamax Splash Attention Kernel                                                                       splash_attention/
+
+import jax
+import jax.numpy as jnp
+from tokamax._src.ops.experimental.tpu.splash_attention                                    Static Sparse Mapping: make_splash_mha
+           import splash_attention_kernel as splash
+from tokamax._src.ops.experimental.tpu.splash_attention                                    pre-calculates the MaskInfo structure to
+           import splash_attention_mask as mask_lib
+                                                                                           identify active blocks (e.g., 6 of 8), allowing
+(bs, q_heads, kv_heads) = (8, 128, 128)                                                    the hardware to skip empty regions and
+(q_seq_len, kv_seq_len) = (4096, 4096)
+(qk_head_dim, v_head_dim) = (192, 128)                                                     focus resources only on non-zero data.
+mask = mask_lib.make_causal_mask((q_seq_len, kv_seq_len))
+config = splash.SplashConfig(
+ block_q=1024,
+                                                                                           Zero-Latency Prefetching: The kernel uses
+ block_kv=2048,                                                                            the mask_next array to prefetch upcoming
+ block_kv_compute=256,
+)                                                                                          mask metadata during active computation,
+attn_fn = splash.make_splash_mha(mask, is_mqa=False, q_seq_shards=1, config=config)
+attn_fn = jax.vmap(attn_fn, in_axes=(0, 0, 0))                                             ensuring the MXU pipeline remains fully
+key, key1, key2, key3, key4 = jax.random.split(jax.random.key(42), 5)
+                                                                                           saturated without memory stalls.
+q = jax.random.uniform(key1, (bs, q_heads, q_seq_len, qk_head_dim), dtype=jnp.float32)
+k = jax.random.uniform(key2, (bs, kv_heads, kv_seq_len, qk_head_dim), dtype=jnp.float32)
+v = jax.random.uniform(key3, (bs, kv_heads, kv_seq_len, v_head_dim), dtype=jnp.float32)
+
+o = attn_fn(q, k, v).block_until_ready()                                                                                                     92
+Splash Attention (Sparse + Flash = Splash)
+1.   Identifying Inactive Regions: The Mask Processing Function analyzes the mask to
+     identify and skip all entirely zero (all-zero) blocks that the query should not attend
+     to. This immediately prunes the vast majority of unnecessary computation.
+
+2.   Execution Metadata: The function computes auxiliary data structures (like
+     block_mask, active_rows, and active_cols) that serve as the sparse execution
+     roadmap, defining the precise coordinates of every active block to be computed.
+
+3.   Fine-Grained Masking: The system applies fine-grained masking only where
+     necessary (on partial_blocks) using compressed partial_masks and pre-computed
+     prefetch indices (mask_next) to efficiently access the mask data.
+
+
+
+
+                                                                                              93
+The Challenge of Causal Masking on Smaller Seq Lengths
+The MFU vs. Efficiency Trade-off: Large block sizes (e.g.,
+2048) are required to saturate Ironwood’s massive MXU for
+peak throughput, but they force the hardware to calculate
+large "fill-in" areas of zeros within a causal mask.
+
+Granularity vs. Utilization: Smaller blocks (e.g., 512) better
+prune the causal mask by skipping more empty regions, yet
+they often collapse Model FLOPs Utilization (MFU) by
+failing to keep hardware pipelines full.
+
+The "Sweet Spot" Search: Optimal performance requires
+finding a block size that is large enough to maintain high
+compute density but small enough to minimize wasted
+computation on masked-out tokens.
+
+Memory vs. Compute Bottlenecks: On shorter sequences,
+the management overhead of small blocks can shift the
+bottleneck from raw compute to memory bandwidth, further
+complicating the scaling strategy.
+
+
+                                                                 94
+Segment IDs
+Sequence Partitioning: Assigns 1D integer arrays to Q and KV
+tokens to identify independent samples within a "packed"
+sequence, preventing unrelated data from interacting.
+
+Identity-Based Masking: Enforces a strict rule where tokens
+only attend to others with matching IDs, effectively eliminating
+information leakage between concatenated samples.
+
+Block-Diagonal Sparsity: Naturally creates a structural pattern
+where only clusters along the diagonal are active, while the rest
+of the matrix remains empty.
+
+Skip-Computation Optimization: High-performance kernels
+use these IDs to bypass "off-diagonal" blocks entirely, saving
+significant memory bandwidth and MXU cycles.
+                                                                    95
+  Segment ID Masks and Joint Masking
+Logical Conjunction: Combines segment IDs with causal or local
+masks via a bitwise AND operation. Attention is only permitted if all
+mask conditions are simultaneously met.
+
+Enforced Isolation: Restricts attention to within-sample tokens,
+ensuring that even if a token is "local" or "causal," it cannot attend
+to data belonging to a different segment ID.
+
+Compound Sparsity: Merging masks increases the total number
+of empty blocks (e.g., a Local + Segment mask), creating a highly
+constrained diagonal that maximizes skipped computations.
+
+Unified Execution Map: The combined results are baked into a
+single MaskInfo structure, allowing the hardware to follow one
+optimized sparse path rather than evaluating multiple masks.
+
+
+
+                                                                         96
+Splash Attention Pallas Call
+●   Parallel Execution Grid
+     ○   grid=(num_q_heads, num_active_blocks)
+●   Tiling Sizes
+     ○   bq, bkv, and bkv_compute define the memory blocks and compute chunk
+         sizes used by the kernel's tiling logic
+●   Masking/Sparse Info (SMEM)
+     ○   fwd_mask_info.{ block_mask, mask_next, active_rows,
+         active_cols, partial_mask_blocks} pass the pre-calculated tables
+         needed by the next_nonzero function to enable sparse and
+         segmented attention traversal - SMEM
+●   Inputs (VMEM)
+     ○   q, k, and v
+     ○   q_segment_ids, kv_segment_ids
+     ○   q_sequence
+           ■    q_sequence holds the absolute token indices for the current
+                Query block. If the full sequence has L=8192 and the block starts
+                at index 2048, the tensor contains 2048,2049,…,4095.
+
+                                                                                    97
+Pallas Call: Execution Grid & Inputs
+
+Grid Definition: The grid is defined by two dimensions:
+(num_q_heads, grid_size). Grid_size is set dynamically using
+the pre-computed sparse metadata:
+fwd_mask_info.num_active_blocks[0]. This ensures threads
+are only launched for the active, non-zero regions of the
+mask, maximizing efficiency
+
+SMEM Inputs: num_scalar_prefetch=6 This instructs the
+hardware to aggressively prefetch the critical
+scalar/metadata inputs (e.g., active_rows, mask_next) into the
+fastest SMEM before the thread begins computing.
+
+VMEM Inputs: (Q, K, V) and necessary metadata (segment
+IDs and partial_mask_blocks) that must be moved from HBM
+to VMEM for the kernel to execute.
+
+                                                                 98
+                                                                                                        Block Sizes [1024, 2048]
+                                                                                                        Seq_length [4096]
+                                                                                                        Block Mask Shape: [4, 2]
+
+Pallas Indexing: QKV Block Address Mapping 0                                                                    K           1
+                                                                                                1   0   0       0     0    0     0   0
+                                                                                        0
+Address Lookup Inputs: The index_map receives seven arguments: (h,                              1   1   0       0     0    0     0   0
+grid_idx, rows_ref, cols_ref, *refs). This consists of the Head Index (h), the                  1   1    1      0     0    0     0   0
+linear Program ID (grid_idx), and several pre-fetched arrays (rows_ref,                 1
+                                                                                                1   1    1       1    0    0     0   0
+cols_ref, etc. 6 of them)                                                          Q            1   1    1       1    1    0     0   0
+                                                                                        2
+Linear to 2D Mapping: The core function (_unravel) converts the linear                          1   1    1       1    1     1    0   0
+Program ID (grid_idx) into the 2D block coordinates. It does this by reading                    1   1    1       1    1     1    1   0
+                                                                                        3
+the pre-calculated i (Q-Row Index) and j(KV-Column Index) values from the                       1   1    1       1    1     1    1   1
+sparse metadata arrays (rows_ref and cols_ref) at the grid_idx position.
+
+Query (Q) Specification: The q_index_map loads Query data based only on          Block Mask                  [1 1 2 1 2 1 0 0]
+its row. It uses the Head Index (h) and the calculated Q-Row Block Index (i)     active_rows
+to determine the block's starting memory address. The column index (j) is        Q-axis index                [0 1 2 2 3 3 0 0]
+discarded.                                                                       active_cols
+                                                                                 KV-axis index               [0 0 0 1 0 1 0 0]
+Key/Value (K, V) Specification: the k_index_map and v_index_map load
+data based on the column. They use the KV-Head Index (h_kv) and the              partial_mask_blocks         Shape (2,1024,2048)
+calculated KV-Column Block Index (j) to find the K/V block's starting
+address.
+                                                                                 mask_next                   [0 1 0 0 1 1 0 0]
+                                                                                 num_active_blocks                                   6   99
+Splash Attention: Auxiliary Input Blocks
+                                                                             Example: 4 segments
+Segment IDs (Q & KV): Starting as simple {seq_len}, these IDs enforce
+segment boundaries to prevent cross-attention. They are sliced into bq(Q)
+and bkv(KV) blocks for segment-matching checks inside the kernel.
+
+Partial Mask Blocks: This large pre-stitched array (e.g., shape [2, 1024,
+2048]) holds specific element-wise masks. The mask_index_map selects
+and retrieves the exact [bq , bkv] mask slice for the current block,
+controlling fine-grained sparsity
+
+Q Sequence Index: This array, originally shaped (seq_len), provides the
+global index of each Q token. It is sliced by bq and used exclusively for
+                                                                            partial_mask_bl Shape
+dynamic masking, allowing an internal function to calculate the attention   ocks            (2,1024,2048)
+mask based on token positions.
+                                                                            mask_next       [0 1 0 0 1 1 0 0]
+
+
+
+                                                                                                                100
+Splash Output: Attention and Residuals
+Final Attention Output (O): Output is written out in blocks corresponding to
+the input data, with a shape of (Head, head_dim_v). It represents the
+weighted sum of V blocks and is the final, normalized output of the attention
+mechanism.
+
+LogSumExp (L Residual): Softmax denominator is written out in blocks of
+size (Head, bq, _), aligning with the Q-sequence block size (bq) (saved for the
+backward pass's numerical stability)
+
+Max Logits (M Residual): Maximum logit per row for numerical shifting is
+also written out in blocks of size (Head, bq, _),, aligning with the Q-sequence
+block size bq. This residual is critical for stable gradient computation.
+
+Scratch buffers (o_scratch, m_scratch, l_scratch) are mandatory
+VMEM-based accumulators that store the running total and max/log-sum of
+the attention calculation across K/V blocks before the final, complete result is
+written to the global output tensor.
+
+
+
+
+                                                                                   101
+                                                                                                                             Block Mask       [1 1 2 1 2 1 0 0]
+    Splash Attention Pallas Call                                                                                             active_rows
+                                                                                                                             Q-axis index     [0 1 2 2 3 3 0 0]
+    Inputs/Outputs                                                                                                           active_cols
+                                                                                                                             KV-axis index    [0 0 0 1 0 1 0 0]
+
+
+            0       K       1
+                                                                                                                             mask_next        [0 1 0 0 1 1 0 0]
+
+    1   0       0   0   0   0   0   0
+0
+    1   1       0   0   0   0   0   0
+    1   1       1   0   0   0   0   0                    Q[1024, 192]
+1                                                        K[2048, 192]
+                                                                                                                                   fwd_mask_info.active_rows,
+    1   1       1   1   0   0   0   0                     V[1024, 128]
+Q   1   1       1   1   1   0   0   0
+                                                 q_segment_ids[1024,]
+                                               Kv_segment_ids[2048, ]
+                                                                                                                                   fwd_mask_info.active_cols,
+                                                                                                                                   fwd_mask_info.mask_next,
+2                                                                                                                                  bounds_start,
+    1   1       1   1   1   1   0   0 Partial_mask_blocks[1024, 2048]
+                                                    q_sequence[1024,]
+                                                                                                                                   bounds_end,
+                                                                                                                                   fwd_mask_info.block_mask,
+    1   1       1   1   1   1   1   0
+3
+    1   1       1   1   1   1   1   1                                                  Q [128, 4096, 192]
+                                                                                       K [128, 4096, 192]
+                                                                                       V [128, 4096, 128]
+Here each block represents [1024, 2048]                                                Q_segment_ids [4096,]
+                                                                                       Kv_segment_ids [4096, ]
+slice (q_seq_len:4096, k_seq_len:4096)                                                 Partial_mask_blocks [2, 1024, 2048]
+                                                               O[128, 4096, 128]       Q_sequence [ 4096,]
+                                                               LogSumExp [128, 4096]
+                                                               MaxLogits [128, 4096]
+
+
+                                                                                                                                                                  102
+Splash Attention Kernel Outline
+
+                         Kernel Control Flow
+
+
+
+                         Initialization
+
+
+
+
+                         Accumulation Loop
+
+
+
+
+                          Final Write
+
+
+
+                                               103
+                                                                    Index (grid_idx)        0     1    2     3     4     5     6        7
+                                                                    active_rows             0     1    2     2     3     3     0        0
+  Kernel Execution Flow                                             bounds_start            T     T    T     F     T     F     T        F
+                                                                    bounds_end              T     T    F     T     F     T     F        T
+
+Kernel Control Flow: The kernel receives the program index          Block Row grid_idx
+                                                                    Index     Range    Action
+(grid_idx) which is mapped directly to the bounds_start and
+bounds_end flags, dictating when initialization and final writing                               Starts and ends immediately.
+should occur for the Q-block being processed.                       Row 0          0            Accumulation completes.
+                                                                                                Starts and ends immediately.
+Initialization (init): Triggered by bounds_start, this executes     Row 1          1            Accumulation completes.
+the @pl.when(should_initialize) block to O, L M scratch                                         Starts at index 2, accumulates over 2
+accumulators in VMEM, preparing them for the accumulation           Row 2          2 to 3       blocks, ends at index 3.
+phase of a new Q-block.                                                                         Starts at index 4, accumulates over 2
+                                                                    Row 3          4 to 5       blocks, ends at index 5.
+Accumulation Loop: The loop iterates over K/V blocks, with its
+precise inner logic controlled by block_mask_ref: it either runs
+the standard accumulation (if should_not_mask is true) or
+applies an element-wise mask (if should_not_mask is false).
+
+Final Write (end): Triggered by bounds_end, this executes the
+@pl.when(should_write) block to normalize the completed
+output and write the final O,logsumexp, and max_logits from
+VMEM to HBM.
+                                                                                                                                        104
+Flash Attention Kernel Body
+1.   Logits Computation
+      ○ qk = lax.dot_general(q, k, qk_dims, preferred_element_type=float32)
+2.   Masking and Conditioning
+      ○   qk = apply_mask_and_soft_cap() # Next Slide
+3.   Updating max logit
+      ○ m_curr = qk.max(axis=-1)[:, None]
+      ○ m_next = jnp.maximum(m_prev, m_curr)
+4.   Normalizing Logits and Summing Contribution
+      ○ s_curr = jnp.exp(qk - pltpu.repeat(m_next, bkv_repeats, axis=1)
+      ○ l_curr = jax.lax.broadcast_in_dim(s_curr.sum(axis=-1), l_prev.shape, (0,))
+5.   Scaling and Final Sum Update
+      ○ alpha = jnp.exp(m_prev - m_next)
+      ○ l_next = l_curr + alpha * l_prev
+6.   Weighted sum for the current segment
+      ○ o_curr = lax.dot_general(s_curr, v, sv_dims)
+7.   Output Accumulator Scaling and Update
+      ○ alpha_o = pltpu.repeat( alpha, head_dim_v_repeats, axis=1)[..., :o_scratch_ref.shape[-1]]
+      ○ o_scratch_ref[:] = alpha_o * o_scratch_ref[:] + o_curr                                      105
+Applying Masks and Soft Cap to Attention Logits
+●   Compute masks
+     ○   Pre-defined/Static Masks: Applies explicit, boolean arrays (loaded beforehand) to mask out invalid
+         connections, such as padding tokens or pre-set causal dependencies.
+     ○   Dynamic/Index Masks: Computes masks on the fly using reconstructed global sequence indices
+         (q_sequence and k_sequence) for tasks like implementing sliding window or local causal attention
+         patterns.
+     ○   Segment ID Masks: Enforces validity for packed sequences by ensuring that a query can only attend
+         to key/value tokens that belong to the same logical segment (q_ids==kv_ids).
+●   Apply cap logits
+     ○   logits = jnp.tanh(qk / attn_logits_soft_cap)
+     ○   logits = logits * attn_logits_soft_cap
+●   Apply Mask
+     ○   mask = functools.reduce(jnp.logical_and, masks)
+     ○   qk = cap_logits(qk)
+     ○   qk = jnp.where(mask, qk, mask_value)
+
+
+
+
+                                                                                                              106
+Splash Attention Kernel - DeepSeekV3
+
+Extracted Tensor Shapes (bq = 2048, bkv = 2048)
+
+    ●      Query (q): bf16[8,128,4096,192]
+    ●      Key (k): bf16[8,128,4096,192]
+    ●      Value (v): bf16[8,128,4096,128]
+    ●      Output (o): f32[8,2048,128]
+    ●      Logsumexp: f32[8,128,4096,128]
+
+(128 query heads, batch size: 8, sequence_length: 4096, q_kv head: 192, v_dim: 128)
+
+
+The custom call also includes several metadata and mask
+tensors with the following shapes:
+
+    ●      block_mask: s8[4] (only 4 blocks)
+    ●      mask_next: s8[4] (only 4 blocks)
+    ●      partial_mask_blocks
+
+Block_q: 2048, Block_k=2048, block_kv_compute: 2048
+results in 2 tiles on 4096 seq length
+
+
+
+
+                                                                                      107
+Splash Attention: Optimization Strategies Summary
+Category       Optimization Technique     Concise Purpose
+                                          Avoids materializing the massive attention matrix by breaking Q×KV into smaller,
+I/O & Tiling   Block-Wise Processing      processable tiles (bq,bkv).
+                                          Manually sets bq/bkv to the maximum size that fits in VMEM and subdivides blocks
+                                          (bkv_compute) to fit intermediate results entirely into fast Vector Registers for zero-stall
+               Tuning & Micro-Tiling      compute.
+                                          Pre-processes the mask once into book-keeping arrays (active_rows, mask_next) to
+                                          create an execution roadmap, allowing the hardware to skip inactive blocks and save
+Sparsity       Sparse Execution Map       computation.
+                                          Combines all mask constraints (Causal, Dynamic, Segment IDs) using logical AND to
+               Joint Masking              precisely control attention boundaries and prevent cross-segment leakage.
+Numerical      Online Softmax & Delayed   Calculates the Softmax iteratively across blocks by accumulating Max Logits (M) and
+Stability      Norm                       LogSumExp (L) residuals. The final normalization (division) is deferred until the very end.
+                                          Replaces the expensive dynamic M calculation with a correct constant, bypassing slow
+               Max Logit Estimate (MLE)   vector reduction instructions to boost arithmetic throughput.
+                                          Scalar accumulation buffers (M, L) are padded from (bq,) to (bq,128) to align data with the
+                                          NUM_LANES wide memory bus, converting many slow scalar reads into one fast vector
+Hardware       Vector Alignment           transaction.
+
+                                                                                                                                         108
+Splash Attention Kernel - Pacchetto Trace
+●   Splash Attention kernel (seq_len: 4096, bq =1024, bkv =1024, and bkv_compute=1024)
+●   The MXU bar has several gaps and fails to maintain continuous saturation at 100%
+●   The kernel is failing to sustain its processing pipeline because inconsistent VLOAD/VLOAD:FILL
+    activity and critical VSTORE:SPILL operations—caused by high Vector Register
+    Pressure—prevent the Matrix Unit (MXU) from maintaining continuous, high-throughput compute
+
+
+
+
+                                                                                                     109
+Optimization Exercises: Tiling, Arithmetic, and I/O
+1.   Experiment with Optimal Tiling by setting the memory block sizes to bq=2048 and
+     bkv=2048 while enforcing Micro-Tiling within the loop by setting the compute chunk size
+     to bkv_compute=512
+2.   Enable the Arithmetic Simplification by setting the max_logit_const (e.g., to 70) to bypass
+     the expensive, dynamic vmax instruction in the kernel's inner loop, thereby boosting the
+     VALU's arithmetic throughput.
+3.   Enable Base-2 Exponentiation by setting the use_base2_exp=True flag to substitute the
+     native exp function with exp2, which often maps to a faster, specialized hardware
+     instruction, improving the speed of the most frequently executed step in the kernel.
+4.   Enable Sparsity Optimization: To improve memory bandwidth, disable the transfer of the
+     large partial_mask_blocks array and instead force the kernel to calculate the element-wise
+     mask dynamically using position index logic, trading memory I/O for compute time.
+5.   Scaling Validation: Profile performance at 16K, 32K, 128K sequence lengths.
+
+
+
+                                                                                                   110
+Reading Material
+●   Earlier Work
+     ○   Flash Attention Paper
+     ○   Flash Attention - 2 Paper
+     ○   Flash Attention - 3 Paper
+●   Tokamax
+     ○ https://github.com/openxla/tokamax
+
+
+
+
+                                            111
+

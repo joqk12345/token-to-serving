@@ -1,0 +1,925 @@
+LLM Serving on Heterogeneous Hardware
+
+
+        Mingxing Zhang @     KVCache.AI
+
+          https://github.com/kvcache-ai
+Background: Large Language Models (LLMs)
+
+    Large Language Models (LLMs) are widely applied in industry and researched in academia.
+
+
+
+
+                 Knowledge Q&A                                   Content Creation
+
+
+
+
+               Code Generation                                    Office Assistant
+ Challenge of Online Model as a Service System
+
+  More Data + Larger Model + Longer Context =                                Higher Intelligence
+
+                                Data Source: SimilarWeb
+
+
+
+
+ Long input: Moonshot AI’s Kimi Supports 2 Million Characters   Long output: DeepSeek release V3/R1 at Dec 2024,
+Input in March 2024, become a widely recognized app in China        Become a widely recognized app in global
+ Challenge of Online Model as a Service System
+
+    More Data + Larger Model + Longer Context =                                Higher Service Loads
+  Frequent out of service
+  even though we scaling Data Source: SimilarWeb
+  out the inference cluster                                                         A lot of throttling
+  for several times
+
+
+
+
+ Long input: Moonshot AI’s Kimi Supports 2 Million Characters   Long output: DeepSeek release V3/R1 at Dec 2024,
+Input in March 2024, become a widely recognized app in China        Become a widely recognized app in global
+           Motivation for Heterogeneous LLM Serving
+
+
+           Core Technologies of Mooncake
+
+Content
+           Core Technologies of KTransformers
+
+
+           Tutorial: Fine-Tune and Chat with Your
+            Customized Model Locally
+!!! The price numbers are not accurate, just a demonstration!
+
+
+
+
+                            H800                                H20    Xeon SPR + 8 * DDR5-4800
+
+          80GB VRAM，3.3 TBps                       96GB VRAM，4 TBps    8*64GB DRAM，8*40GB/s
+ Hardware
+               ~ 1 PFLOPS                             ~ 200 TFLOPS           < 20 TFLOPS
+   Spec
+               > $ 10,000                               ~ $50,000             ~ ¥60,000
+
+
+     Best                 Allround,
+                                                         Bandwidth/$          Capacity/$
+      for          especially for TFLOPS/$
+
+
+      1 Motivation for Heterogeneous LLM Serving
+LLM Inference
+
+
+           Prefill                                        Decode
+                  LLM              LLM                  LLM              LLM
+              iteration 1      iteration 2          iteration 3      iteration 4
+
+
+
+            What day is it     KV
+                                      Today        KV
+                                                             is     KV
+                                                                           Friday   END
+              today?          Cache               Cache            Cache
+
+
+
+
+ Time To First Token (TTFT)                  Time Between Tokens (TBT)
+   LLM Inference: Prefix Caching
+
+ • KVCache can be shared across requests with the same prefix, reducing computation
+“What day is it today”                           “What day is it tomorrow”
+
+              Prefill for Request I                                  Prefill for Request II
+
+                What                                                  What
+                                      What                                                What
+                 day                  day                              day                    day
+                                              KVCache Reuse
+                  is                   is                               is                    is
+                  it                   it                               it                    it
+                                      today                           tomor
+                today                                                                   tomorrow
+                                                                       row
+
+                       (5 tokens computed)                                   (1 token computed)
+Different Hardware are Good at Different Dimension
+
+
+
+
+                   H800                     H20                        Xeon SPR + 8 * DDR5-4800
+
+           80GB VRAM，3.3 TBps         96GB VRAM，4 TBps                 8*64GB DRAM，8*40GB/s
+Hardware
+                ~ 1 PFLOPS               ~ 200 TFLOPS                        < 20 TFLOPS
+  Spec
+                > $ 10,000                 ~ $50,000                          ~ ¥60,000
+                For Prefill!             For Decode!                             For KVCache!
+  Best            Allround,
+                                         Bandwidth/$                              Capacity/$
+   for      especially for TFLOPS/$
+
+                                                  !!! The price numbers are not accurate, just a demonstration!
+2 Core Technologies of Mooncake
+ Mooncake：A KVCache-centric Disaggregated Architecture
+          for LLM Serving
+
+ • _        The serving platform of Kimi       KVCache-
+   icon
+                                                                      Prefill Instance                         Prefill Instance
+                                                centric
+                                               Conductor              GPU/VRAM                                 GPU/VRAM
+                                                                                                       PP/SP
+                                                           Prefill      Local                                    Local
+ 1. P/D disaggregation                          Cache-
+                                                           Pool       Chunked
+                                                                        Prefill
+                                                                                                               Chunked
+                                                                                                                 Prefill
+                                                aware                 Scheduler      Paged KVCache             Scheduler      Paged KVCache
+          architecture centered around           Prefill
+                                               Scheduler
+                                                                      CPU/DRAM/SSD                             CPU/DRAM/SSD
+          the distributed KVCache pool                                      Distributed KVCache Pool                 Distributed KVCache Pool
+
+                                                           KVCache
+ 2. Trading more storage of less
+                                               KVCache
+                                                Balance                                                    Inter-node KVCache Transfer
+                                               Scheduler     Pool
+
+          compute! Increase the                                       CPU/DRAM/SSD                             CPU/DRAM/SSD
+                                                                            Distributed KVCache Pool                 Distributed KVCache Pool
+          throughput of Kimi by 75%              Load-
+                                                                      GPU/VRAM                                 GPU/VRAM
+                                                balance
+                                               Decoding                              Paged KVCache                            Paged KVCache
+                                                           Decoding
+ 3. Meet SLO guarantee                         Scheduler
+                                                             Pool       Local                                    Local
+                                                                      Scheduler                                Scheduler
+  Moonshot AI +        KVCache.AI @ Tsinghua
+More：https://github.com/kvcache-ai/Mooncake                           Decoding Instance                        Decoding Instance
+
+Mooncake (1): 在月之暗面做月饼，Kimi 以 KVCache 为中心的分离式推理架构
+Kimi @ Moonshot AI
+    P&D Disaggregated Inference
+
+    • Avoid interference between prefill and decoding in a mixed batch
+    • Decouple resources and parallelism to improve MFU (Model Flops Utilization)
+         Worse
+                                    Prefill prioritizing
+
+
+
+
+   TBT     Chunked prefill[1]
+
+
+
+                                          P&D disaggregation
+
+           Decode prioritizing                             Better
+
+                                MFU
+[1] Agrawal et al. Taming Throughput-Latency Tradeoff in LLM Inference with Sarathi-Serve (OSDI’24)
+P&D Disaggregation V.S. Chunked Prefill
+
+
+
+
+ （a）                           （b）
+Conversa                       Tool
+  tion                         Use
+
+
+
+
+◼ Better SLO control
+P&D Disaggregation Becomes a Necessary
+
+◼ Prefill and decode needs different parallelism strategy, e.g., DeepSeek V3/R1
+KVCache Cache introduces High Challenges
+to Storage System
+• Each 1 token -> 2 * layers * hidden dimension = tens of KB KVCache
+• Not only the size of KVCache is large, it also requires high transfer    Reusable
+  bandwidth to avoid stall of GPU                                          KVCache
+                                                      KVCache of
+                                                       TB Model           (Hundreds
+                                                      (tens of TB)
+                                 TB Model                                 of TB ~ PB)
+           100B+ Model             (TB)
+           (Hundreds of
+10B+ Model     GB)
+   (GB)
+KVCache Cache：Local or Global
+
+
+                            ◼ Cache hit ratio grows proportional to
+
+                                the size of the cache
+
+                             Different scenarios has different
+
+                                 settings
+
+                             Overall, we need PB-level cache that
+
+                                 exceeds to size of a single machine
+Mooncake Store：Distributed Multi-layer KVCache Cache
+
+• Key of KVCache Cache：Large size and bandwidth
+ Utilize high performance connection like (GPUDirect) RDMA/Storage
+
+
+
+                                                   Will be open sourced soon!
+
+                                                   • Pooled memory as KVCache cache
+
+                                                   • Independent to specific inference
+
+                                                      engine
+
+                                                   • Optimized for multi-NIC scenario
+ Mooncake Store: External Integration
+
+Inference
+              vLLM, and other inference engine                  Megatron, training
+ Engine
+                                   Zero-copy Object Put/Get
+
+            Managed Store (master-slave)               P2P Store (client-only)
+Mooncake
+                               Mooncake Store BatchTransfer API
+  Store
+                                Mooncake Transfer Engine
+                                      Memory Read/Write
+
+         Bare-metal                                           Third-party
+ Storage  Storage
+Resource Resource                                              Memory
+                      Local mem Remote mem (Remote) SSD        Storage
+Evaluation: Effective Request Capacity
+
+ Effective request capacity: Number of requests that meet the latency requirements
+ Achieve up to a 498% increase in effective request capacity compared to vLLM, vLLM with
+  prefix caching and with chunked prefill
+
+
+       Better                         Better                       Better
+Evaluation: GPU Computation Cost
+ Cache hit rate: global cache > local cache
+ Save 29% - 61% on GPU computation costs
+  Mooncake – Open Sourced and Build with the Community
+                         From flagship applications                                                  To industry-wide adoption
+    2024.3 Kimi went viral for its long-context                  2024.11 Mooncake open-sourced;                         Used in Dynamo, the distributed inference
+capabilities, using Mooncake to handle surging traffic          adopted by Alibaba and Ant Finance                      system highlighted at GTC 2025 Keynote
+
+
+
+                                 2024.6 Mooncake tech report sparked                                  2025.2 USENIX FAST
+                                       wide industry discussion                                         Best Paper Award
+
+
+
+
+                                                           kvcache-ai/Mooncake -- An open-source initiative co-launched by Moonshot AI and Tsinghua University,
+                                                                         with collaboration from various large model and infrastructure providers
+
+
+
+
+                                                                                                                                                  and more …
+          USENIX FAST2025 Best Paper
+Mooncake – Adopted/Collaborated with Other Famous Communities
+
+                                            NVIDIA Dynamo
+                                       •   Spotlighted by Jensen
+•   One of the most widely used            Huang at GTC 2025
+    inference engines, adopted by          Keynote
+    major cloud providers              •   Its architecture is inspired
+•   Its distributed inference is           by Mooncake, with
+    built on Mooncake                      explicit acknowledgments
+
+
+
+
+•   Inference engine of xAI, widely
+    used in DeepSeek inference
+•   Distributed architecture was co-
+    developed with Mooncake
+Key to KVCache
+
+                              • Mooncake Transfer Engine
+                              • End-to-end zero-copy
+
+                                      Transfer Fast
+
+
+
+
+                               High-performance distributed
+                                    KV cache storage
+
+
+                 Store More                                   Easy to Use
+
+ • Elastic, Shared, and Multi-layer KV Cache           • Extensive and user-friendly APIs
+ • Memory Allocator Optimized for LLM Inference
+Transfer Fast: Mooncake Transfer Engine
+
+•   Key features
+    • Topology-aware path selection
+    • Multi-NIC pooling
+    • Supports multiple protocols
+      and provides unified interfaces.
+    • Multi-language APIs
+
+
+
+                                         Lightening fast over RDMA
+                                         • 40 GB KVCache (128k tokens, LLaMA3-70B)
+                                         • 87 GB/s @ 4×200 Gbps, RoCE
+                                         • 190 GB/s @ 8×400 Gbps, RoCE
+    Store More: Elastic Shared Multi-layer KV Cache
+
+•   Key features
+
+     • Distributed KV cache sharing: storing
+       one and usable by all
+
+     • Dynamic resource scaling: dynamically
+       adding and removing store nodes
+       (startup in <80s for 500GB memory and
+       8 RDMA NICs)
+
+     • Multi-layer storage (WIP): offloading
+       cached data from RAM to SSD
+Extensive APIs, Easy to Use
+
+Put/Get APIs                                  Hello world example
+•   Put/Get single object
+•   Batch Put/Get
+•   (Batch) Zero-copy Put/Get: recommended
+•   (Batch and zero-copy) Put/Get from/into
+    multi-parts
+
+
+Configurable KV cache placement
+• Replica number
+• With soft pin
+• Preferred segment
+How to Integrate with SGLang？ - HiCache
+
+HiCache by Zhiqiang, et. al.
+
+
+
+
+                                     Page First Layout
+SGLang + Mooncake
+
+
+
+                    • 3 Prefill + 9 Decode
+
+                    • DeepEP + EPLB
+
+                    • Double Batch Overlap
+
+
+
+
+                         • 52.3k input tps
+
+                         • 22.3k output tps
+
+                         • per node
+SGLang + HiCache + Mooncake
+
+
+                              Thanks：
+Mooncake P2P Store: Faster Checkpoint/KVCache Restore in RL
+
+ https://github.com/MoonshotAI/checkpoint-engine/
+
+
+
+
+                                                    Fast Checkpoint Transfer
+ Attention + MoE
+
+
+
+
+     GPU + CPU
+
+
+
+Background and Observation of LLM and Sparse Mixture-of-Experts (MoE)
+
+
+3 Motivation for Local Heterogeneous LLM Serving
+Background: Sparsification Trends in LLMs
+
+
+
+
+    2 out of top 10 open-source models are MoE   All top 10 open-source models are MoE
+Background: Sparse Mixture-of-Experts (MoE)
+
+
+
+
+                                     Dense FFN → Sparse Mixture-of-Experts（MoE）
+                                     One large         Hundreds of         Activate only
+                                      matrix          small matrices   +   6~8 at a time
+      Transformer Architecture
+Background: New Challenge in local deployment
+
+    As model sizes grow, traditional GPU-only solutions demand increasingly expensive hardware.
+
+                                                                         8 x H20
+
+
+
+
+                                                  4 x A100
+
+
+
+
+                           1 x RTX 4090
+Observation: CPU DRAM is More Suitable for Sparse Models
+
+                    A100                    Xeon SPR + 8 * DDR5-4800
+
+
+
+
+Hardware     80GB VRAM，2 TBps                  8*64GB DRAM，8*40GB/s
+  Spec           > $ 15,000                           ~ $ 8,000
+
+Bandwidth
+  Cost
+                $ 7.5 per GBps      <                 $ 25 per GBps
+                                                                                  Well Suited
+                                                                                  for Sparsity
+Capacity
+ Cost
+                 $ 187 per GB      >>                 $ 15.6 per GB
+                                        The price numbers are not accurate, just a demonstration!
+ KTransformers: Arithmetic Intensity-Aware Offloading Strategy
+
+
+                                                                               Offload Priority：
+
+                                                                                Routed Experts
+
+                                                                                      >
+
+                                                                                Shared Experts
+Operator         MLA Attention          Norm & Linear &       Routed Experts
+                                         Shared Experts                               >
+Total Size   ~ 5B for 128K Context         ~17B                ~654B
+Arithmetic          High                     Medium              Low            MLA Attention
+ Intensity
+                           On a Single GPU                Offloaded to CPUs
+Overall KT-System and Optimize in Prefill & Decode
+
+
+4 Core Technologies of KTransformers
+KTransformers: Challenges and Key Solutions
+
+
+                         Prefill                         Decode
+
+                 CPU is the Bottleneck for    Latency of CPU/GPU Coordination
+Challenges         Intense Computation            Poor CPU/GPU Overlap
+
+
+
+                                                      CUDA Graph
+                Advanced CPU Instructions:
+Solutions                                       Numa-aware Tensor Parallel
+                        Intel AMX
+                                                     Expert Deferral
+Prefill: Intel Advanced Matrix Extensions (Intel AMX)
+
+         How AVX-512 solves INT8 matrix multiplication problems
+         1                            64             1            AMX is 8x faster than AVX-512
+     1                            1
+                                                64
+                        +=                  *
+
+
+               128OPS/cycle/FMA. 256OPS/cycle/core
+
+
+         How AMX solves INT8 matrix multiplication problems
+          16                          64             16
+
+
+16                           16
+                                                64
+
+                        +=                  *
+
+
+               32768OPS/16cycle/core. 2048OPS/cycle/core
+Prefill: AMX Tiling-aware GEMM Kernel
+
+Carefully designed memory layouts and cache-optimized kernels.     BF16 GEMM Throughput (Single Xeon4 CPU).
+
+
+
+
+                                                                                               Over 20
+                                                                                               TFLOPS
+
+
+
+                                                                 INT8/INT4 GEMM Throughput (Single Xeon4 CPU).
+
+
+
+
+                                                                                                Over 37
+                                                                                                TOPS
+Prefill: End-to-end Performance
+
+       Up to 19.74× faster than Llama.cpp (which does not use AMX kernel)
+       Up to 5.88× faster than Fiddler (which uses Torch’s native AMX kernel, sub-optimal)
+Decode: CUDA Graph
+
+
+Challenge: Inefficient CPU-GPU coordination
+Fiddler/Llama.cpp forward (a single token) requires
+~7000/3000 CUDA kernels, with launch time
+taking 73%/21% of total.
+
+
+
+
+                                                      Solution: CUDA Graph
+                                                      Capture the full forward in a CUDA Graph to
+                                                      remove launch overhead, while carefully avoiding
+                                                      CPU-based operations that introduce breakpoints.
+Decode: Numa-aware Tensor Parallel
+
+
+
+ Challenge: Inefficient CPU-CPU coordination
+ Modern systems span multiple NUMA nodes, cross-NUMA
+ memory access has worse latency/bandwidth.
+
+
+
+
+                                                       Solution: Numa-aware Tensor Parallel
+                                                       Place expert weight slices in the local memory of
+                                                       each NUMA node so that memory access is mostly
+                                                       local, avoiding expensive cross-NUMA memory traffic.
+Decode: Expert Deferral Mechanism
+
+
+
+                                        CPU process
+     CPU busy
+                                        experts a, b
+
+
+
+     CPU idle                           CPU continue
+                                        with experts c, d
+
+
+
+                                        CPU process
+     CPU busy
+                                        experts a, b
+
+
+
+
+         CPU and GPU work alternately             CPU and GPU work concurrently
+Decode: Determining the Number of Deferred Experts
+
+     Concern 1: Decoding Speedup     Concern 2: Model Accuracy Drop
+
+
+
+
+                                     Balanced Configuration:
+                                     defer as few experts as needed to saturate the CPU,
+                                     while keep at least 2 non-deferred experts per layer to
+                                     protect model accuracy.
+Decode: End-to-end Performance
+
+  Full-accuracy implementation is up to 1.92× faster than Llama.cpp and up to 4.09× faster than Fiddler.
+  Expert Deferral provides up to 1.45× additional speedups.
+Open Source: KTransformers High-performance Heterogeneous Inference System
+
+             Exploratory Open-Source Framework                                                                Widely Used
+                                                                                                                          Future. Integrating more features.
+Jul. 2024. First open release. DeepSeek-V2     Feb. 2025. DeepSeek-V3/R1 with            May. 2025. Release            Supporting more hardware and models.
+      with Single GPU + 136GB DRAM               Single GPU + 382GB DRAM               AMX-based CPU kernel.
+
+
+
+
+              Aug. 2024. Support 1M-level long context.             Apr. 2025. Support multiple batch size.      Oct. 2025. Integrating into
+
+
+
+
+                                                                        15 K
+                                                               Github Stars
+
+
+
+
+  (a) Flexible Framework                                  (b) Top 0.01% on Github                   (c) Various models and hardware supported
+Release Partner of Qwen and Kimi K2 – SOTA Open Source LLMs
+Future: Sparse Attention
+
+                                  Dense Attention → Sparse Attention
+                                                      Hundreds of         Scan only a
+                                     Full
+                                  Attention           small chunks   +   few at a time
+
+
+
+
+       Transformer Architecture
+KTransformers × LLaMaFactory & SGLang
+
+
+5 Tutorial: Fine-Tune and Chat with Customized Model
+More Open Source Integration
+
+
+
+                                           https://github.com/hiyouga/LLaMA-Factory/issues/9266
+
+
+       FineTuning – Integrated into LLaMA-Factory for local fine-tuning
+
+
+
+                                           https://github.com/sgl-project/sglang/issues/11425
+
+
+  Inference – Integrated into SGLang for wider model support and multi-GPU acceleration
+
+               You will be able to fine-tuning and inference 671B DeepSeek
+               and 1TB Kimi K2 locally with consumer GPUs + server CPUs!
+KTransformers LoRA SFT: Overview Framework
+
+
+ As a high performance backend engine, KTransformers combined with Easy-to-use framework LLaMA-Factory.
+
+
+
+
+                                                                             Star     Fork
+
+
+
+
+                                                                             Star     Fork
+KTransformers LoRA SFT: Performance
+KTransformers LoRA SFT: Demo
+KTransformers LoRA SFT: Stylized and Benchmark Performance
+
+
+ DeepSeek-V2-Lite-14B
+ • 5GB GPU VRAM
+ • 30GB CPU RAM
+ • End-to-End 227.6 token/s
+
+ DeepSeek-V3/R1-671B
+ • 70GB GPU VRAM
+ • 1.2TB CPU RAM
+ • End-to-End 40.35 token/s
+
+ Kimi-K2-1T
+ • 81GB GPU VRAM
+ • 2.1TB CPU RAM
+ • End-to-End 36.55 token/s
+Customize your KTransformers-FT: Customize model
+
+
+ model_name_or_path: must be BF16 model
+
+
+
+                                                                   Put the model path after convert
+            ≈ 689G, 671B => FP8
+
+
+
+
+                                                                             Similarly,
+                                          https://github.com/deepseek-
+                                          ai/DeepSeek-V3                     Kimi-K2 is INT4 format,
+                                                                             need convert to BF16,
+              ≈ 32G, 14B => BF16                                             then fine-tuning with KT.
+Customize your KTransformers-FT: Customize LoRA & Train
+
+
+   Settings                What it does
+
+                 range in [4, 8, 16, 32]
+   lora_rank     high -- more memory, more fit to
+                 big scale data
+                 which layer you want to fine-tun
+  lora_target
+                 choose less layer -- low memory
+
+
+
+
+       Challenge                                                How to Adjust
+    GPU memory tight                   Set per_device_train_batch_size=1 + gradient_accumulation_steps=16
+      Model overfits                         Add lora_dropout: 0.1 + reduce `num_train_epochs` to 2
+Customize your KTransformers-FT: Customize Dataset
+
+                                            Step3:
+ Step1: Construct your own data, fit with                          replace the default name with your data name
+ the format as follows
+
+
+
+
+ Step2: write the name-path of your data
+ to LLaMA-Factory/data/dataset_info.json
+                                            template: must fit the pre-trained model
+
+
+                                            cutoff_len: truncates long texts
+                                            max_samples: set 100 for debug, None for full training
+Customize your KTransformers-FT: Customize KT-Optimize
+
+ What is KT Optimize Rule?
+ Take a example,
+                             Regular Expression
+
+                                                        KT Support Operators (Partly)
+                           Expert-Parallel
+                           Operator with SFT
+
+
+
+
+       Different layer place on different cuda device
+
+
+
+ KTransformers offers high-performance operators,
+ which replace the original model operators following
+ our optimization rules.
+KT-FT Tech Part I: KT-Attention (KTLinearLora)
+
+Retaining the inserted features of both KT and LoRA
+                                                                  Linear LoRA
+                                              Capture by Torch    target_modules
+                                              Compute Graph
+                                                                                     KTLinearLora      KTLinearLora
+
+
+
+                                                                                         Lora.Linear
+
+
+
+
+                                  KT_inject                                                 FlashAttention
+                                                                 LoRA_inject                   Backward
+
+
+
+
+                                                       KT Features   LoRA Features    KTLinearLora
+
+                                                           KTransformers
+                                               KT load
+                                                            LinearLora
+KT-FT Tech Part II: KT-MoE (backward)
+
+
+  In torch compute graph:
+                                                                           MoE：AMX+Intel(R) Xeon(R)
+    Compute the backward of MoE in CPU, not seen in torch compute graph.
+                                                                           Platinum 8488C
+                                                                           +2 RTX4090 (48G VRAM)
+                  KT-MoE                                     Torch-MoE
+                                                                                     TFLOPS Time/layer
+                                                                           Forward   9.53    50.6ms
+                                                                           Backward 11.09    67.4ms
+
+
+                                                                            • Support AMX/llamafile
+                                                                            • Support NUMA
+                                                                            • Support forward cache
+KT-FT Tech Part III: KT-multi-GPU (KTrainer & KAccelerate)
+
+    Motivation: DeepSeek-V3-671B requires 70G VRAM in KT，needs to place on 2 or more RTX 4090
+
+                                       Avoid transformers carry model to single-gpu, keep KT placement
+          Construct Class
+            KTrainer &                   KTrainer: Use ModelParallel, forbid DataParallel for multi-gpu
+           KAccelerate
+                                      KAccelerate: loss move to cuda:0, other tensor remain in multi-gpu
+ Test Result
+
+ Qwen3MoE-235B 16G GPU VRAM+455G CPU DRAM             Kimi-K2-1000B 81G GPU+1.9T CPU+200G swap
+ target_module: QKVO+shared experts+FFN               target_module: QKVO+shared experts+FFN
+ End-to-end speed：512 * 8 / 119 = 34.4 token/s        End-to-end speed：512 * 8 / 115 = 35.6 token/s
+KTransformers Inference: Overview Framework
+
+ Motivation: more experts placed on GPUs → fewer CPU memory accesses under bandwidth bottleneck
+
+
+
+                                                               Hybrid Expert Backend:
+                                                               AMX-optimized CPU kernels + CPU/
+                                                               GPU Hybrid Expert Parallelism for MoE
+
+
+
+
+                                                               Multi-GPU Hybrid Serving Engine:
+                                                               Multi-GPU Tensor Parallelism + Mixes
+                                                               different backends under one API
+KTransformers Inference: Demo
+KTransformers Inference: Performance
+
+    Native KTransformers: single-GPU+CPU               SGLang+KTransformers: multi-GPU+CPU
+
+
+
+
+ KTransformers gains to reduced CPU/GPU              The same 8-GPU configuration achieves a 264%
+ coordination overhead, reaching up to 4× speedup.   throughput gain compared to 1 GPU.
+KTransformers Inference: Practice Tutorial
+
+ Step1: Prepare the model weights
+ Method1: Download the quantized model from
+ https://modelscope.cn/profile/ApproachingAI2024
+
+
+
+
+ Method2: Download the origin model from
+ Huggingface, and convert by https://github.com/
+ kvcache-ai/ktransformers/blob/main/kt-kernel/
+ scripts/convert_cpu_weights.py
+KTransformers Inference: Practice Tutorial
+
+                                                KT settings about run faster/ more precise:
+Step2: Launch the SGLang server
+                                                   --kt-method: more throughput with AMXINT4, more precise
+                                                   with AMXINT8; without AMX, you can choose LLAMAFILE
+                                                   --kt-cpuinfer: More CPU cores → higher MoE throughput
+                                                   --kt-threadpool-count: The number of NUMA nodes
+                                                   --kt-num-gpu-experts: More gpu-experts → faster calculation,
+                                                   but higher GPU VRAM needs
+   More original SGL settings refer to
+   https://docs.sglang.ai/references/faq.html   SGL settings if you deal with CUDA OOM:
+                                                   --mem-frac...: If OOM, small to decrease KV Cache memory
+                                                   --chunked-prefill-size: If OOM in prefill, reduce it to 2048/4096
+                                                   --max-running-requests: If OOM in decoding, lower it
+                                                   --max-total-tokens: If not long prompt, lower to prevent OOM
+KTransformers Inference: Practice Tutorial
+
+             After launch the sglang server, the model exposes an OpenAI-compatible Chat Completions API
+
+ Just send HTTP requests to call the server by POST:      Use the bench_serving in sglang:
+
+
+
+                                                           python -m
+                                                           sglang.bench_serving \
+                                                            --backend sglang \
+                                                            --host 127.0.0.1 \
+                                                            --port 30000 \
+                                                            --num-prompts 1000 \
+                                                            --model
+                                                           models/DeepSeek-R1-
+                                                           0528-GPU-weight
+Thanks!
+
+
+
+
+          https://github.com/kvcache-ai
+

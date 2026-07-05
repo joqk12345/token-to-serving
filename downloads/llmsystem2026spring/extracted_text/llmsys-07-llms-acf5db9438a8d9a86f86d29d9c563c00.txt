@@ -1,0 +1,228 @@
+Pre-trained LLMs
+
+      Lei Li
+                             Recap
+• Sequence-to-sequence encoder-decoder framework for
+  conditional generation, including Machine Translation
+
+• Key components in Transformer
+  o Positional Embedding (to distinguish tokens at different pos)
+  o Multihead attention
+  o Residual connection
+  o Layer norm
+
+
+
+                                                                    2
+                  Today’s Topic
+• Pretrained Encoder-Decoder LLM: T5
+
+• Pretrained Decoder-Only LLMs: LLaMA
+
+• GPT3
+
+
+
+
+                                        3
+                                                                                      T5
+          • Model Architecture
+                 o Standard encoder-decoder Transformer
+                 o Decoding: beam search
+                        ▪ Beam width=4, length penalty=0.6
+
+          • Model Size
+                 o T5-base: 220 million parameters
+                        ▪ 12 blocks, dff = 3072, dkv = 64, 12-headed attention, dmodel = 768
+                 o T5-3B
+                        ▪ 24 blocks, dmodel = 1024 , dkv = 128, dff = 16384, 32-headed attention
+                 o T5-11B
+                        ▪ 24 blocks, dmodel = 1024 , dkv = 128, dff = 65536, 128-headed attention
+                                                                                                                                                                              4
+Raffel, Colin, et al. "Exploring the limits of transfer learning with a unified text-to-text transformer." The Journal of Machine Learning Research 21.1 (2020): 5485-5551.
+                           Training
+          Pre-training                  Multitask Finetuning
+
+• Pretraining: C4: filtered English corpus from Common Crawl
+  o 750GB, still used often today
+
+• Supervised fine-tuning
+  o Language understanding/Text classification: GLUE/SuperGLUE
+  o Summarization: CNN/Daily mail corpus
+  o Question answering: SQuAD
+  o Translation: WMT English to German, French, Romanian
+                                                                 5
+        T5 Pre-training: Recover randomly
+                 corrupted spans
+  Standard next token cross entropy loss, plus … Cloze-style QA
+  15% of text are corrupted
+
+
+
+
+Pre-train for 0.5 million steps on a batch size of 128 sequences of length 512.
+packing multiple seqs 65k tokens per batch, result in 34B trained tokens.      6
+    T5 Multitask SFT with Task Instruction
+
+
+
+
+Unified format to put task instructions as natural language in the input,
+    enables transfer to new tasks. with more instruction tuning ➔ T0, Flan-T5 7
+                                                               LLaMA
+• Model Architecture:
+     o Based on Transformer decoder-only, with a few improvements.
+     o Pre-normalization [GPT3]
+     o SwiGLU activation function [PaLM]: Swish-Gated Linear Unit
+     o Rotary Embeddings [RoFormer]
+
+
+
+
+Touvron, Hugo, et al. "Llama: Open and efficient foundation language models." arXiv preprint arXiv:2302.13971 (2023).   8
+pre Layer Normalization
+             FFN with SwiGLU
+ Swish activation   FFN with ReLU
+                    FFN(𝑥) = 𝑚𝑎𝑥(0, 𝑥 ⋅ 𝑊1 + 𝑏1 ) ⋅ 𝑊2 + 𝑏2
+
+                                            dim=4d
+                    FFN with SwiGLU
+                    FFN𝑆𝑤𝑖𝐺𝐿𝑈 𝑥
+                    = 𝑆𝑤𝑖𝑠ℎ 𝑥 ⋅ 𝑊1 + 𝑏1 ⨀ 𝑥 ∙ 𝑊2 + 𝑏2
+𝑠𝑤𝑖𝑠ℎ 𝑥 = 𝑥𝜎 𝛽𝑥     ⋅ 𝑊3 + 𝑏2
+           1
+  𝜎 𝑥 =
+        1 + 𝑒 −𝑥                    dim=2/3 * 4d
+
+                                                              10
+                           Rotary Embedding (RoPE)
+    make the attention weight depending (only) on position distance
+                         cos 𝑚𝜃 − sin 𝑚𝜃        𝑥𝑚,1
+           𝑓 𝑥𝑚 , 𝑚 =                           𝑥𝑚,2
+                         sin 𝑚𝜃      cos 𝑚𝜃
+                                         𝑇
+                  𝑓 𝑥𝑚 , 𝑚 ∙ 𝑓 𝑥𝑛 , 𝑛 = 𝑥𝑚 𝑅𝑛−𝑚 𝑥𝑛
+
+
+
+
+Su et al. RoFormer: Enhanced Transformer
+                                                                      11
+with Rotary Position Embedding 2021.
+                          Rotary Embedding (RoPE)
+         𝑓 𝑥𝑚 , 𝑚
+                  cos 𝑚𝜃1                  −sin 𝑚𝜃1                        𝑥𝑚,1
+                  sin 𝑚𝜃1                  cos 𝑚𝜃1                         𝑥𝑚,2
+         =                                                                 𝑥𝑚,3
+                                                      cos 𝑚𝜃2   −sin 𝑚𝜃2
+                                                      sin 𝑚𝜃2   cos 𝑚𝜃2    𝑥𝑚,4
+
+       𝑓 𝑥𝑚 , 𝑚 𝑇 ∙ 𝑓 𝑥𝑛 , 𝑛 = 𝑥𝑚
+                                𝑇
+                                  𝑅𝑛−𝑚 𝑥𝑛
+
+
+
+Su et al. RoFormer: Enhanced Transformer
+                                                                                  12
+with Rotary Position Embedding 2021.
+                                                                          LLaMA
+         • Model Size
+
+
+
+
+                                                                                                                        13
+Touvron, Hugo, et al. "Llama: Open and efficient foundation language models." arXiv preprint arXiv:2302.13971 (2023).
+                                                                          LLaMA
+         • Training Strategy
+                o Trained with the standard language modeling loss function: the
+                  average log probability of all tokens without label smoothing
+                o Auxiliary loss to encourage the softmax normalizer to be close to 0
+
+         • Pre-training Details
+                o Using only open-source data
+
+
+
+
+                                                                                                                        14
+Touvron, Hugo, et al. "Llama: Open and efficient foundation language models." arXiv preprint arXiv:2302.13971 (2023).
+                                                                            GPT3
+         • Model Architecture
+               o Based on the standard Transformer architecture
+               o With modified initialization, pre-normalization, and reversible tokenization
+               o Alternating dense and locally banded sparse attention patterns
+
+
+
+
+                                                                                                                                      15
+Brown, Tom, et al. "Language models are few-shot learners." Advances in neural information processing systems 33 (2020): 1877-1901.
+                                                                            GPT3
+         • Model Size
+
+
+
+
+                                                                                                                                      16
+Brown, Tom, et al. "Language models are few-shot learners." Advances in neural information processing systems 33 (2020): 1877-1901.
+                                                                            GPT3
+         • Training Strategy
+                o Unsupervised Pre-training
+
+         • Training Details
+
+
+
+
+                                                                                                                                      17
+Brown, Tom, et al. "Language models are few-shot learners." Advances in neural information processing systems 33 (2020): 1877-1901.
+                                                              Computation
+
+
+
+
+                                                                                                                                      18
+Brown, Tom, et al. "Language models are few-shot learners." Advances in neural information processing systems 33 (2020): 1877-1901.
+                         Quiz
+https://canvas.cmu.edu/courses/51352/quizzes/155254
+
+
+
+
+                                                      19
+ Summary – Key Ideas in Modern Pre-
+           trained LLMs
+• Pretraining: Mask-labeled recovery of random spans + next
+  token prediction
+
+• Multitask supervised fine-tuning with instruction templates
+  o T5, InsturctGPT
+
+• Relative position: Rotary positional embedding
+
+• Smooth activation: SwishGLU
+
+• Sparse attention
+                                                                20
+                         HW3
+https://llmsystem.github.io/llmsystemhomework/assignment_3/
+
+
+
+
+                                                              21
+            Reading for Next Class
+• Neural Machine Translation of Rare Words with Subword
+  Units. Sennrich et al. 2016.
+
+• SentencePiece: A simple and language independent
+  subword tokenizer and detokenizer for Neural Text
+  Processing. Kudo and Richardson. 2018
+
+
+
+
+                                                          23
+
