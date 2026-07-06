@@ -1,6 +1,6 @@
 # Figure Production Status
 
-Date: 2026-07-05
+Date: 2026-07-06
 
 Scope: required figures declared in `book/chapters/*-brief.md`, plus existing figure specification files under `book/figures/`.
 
@@ -9,7 +9,7 @@ Scope: required figures declared in `book/chapters/*-brief.md`, plus existing fi
 - Brief-declared required figures: 88.
 - Existing figure spec files: `part-i-figure-specs.md`, `part-ii-figure-specs.md`, `part-iii-figure-specs.md`, `part-iv-figure-specs.md`.
 - Caption review completed: all parts, in `process/review-memos/part-i-figure-caption-review-2026-07-05.md`, `process/review-memos/part-ii-figure-caption-review-2026-07-04.md`, `process/review-memos/part-iii-figure-caption-review-2026-07-05.md`, and `process/review-memos/part-iv-figure-caption-review-2026-07-05.md`.
-- Current production state: inventory complete; no rendered figure assets are present in `book/figures/`.
+- Current production state: Chapters 1-5 artwork complete; twenty-two editable SVG assets are present under `book/figures/artwork/`.
 
 ## Reconciliation Items
 
@@ -23,8 +23,8 @@ Scope: required figures declared in `book/chapters/*-brief.md`, plus existing fi
 
 | Part | Chapters | Brief inventory | Specs | Caption review | Artwork state | Next action |
 | --- | --- | --- | --- | --- | --- | --- |
-| I | 1-3 | complete | drafted | passed | not started | Begin diagram production. |
-| II | 4-6 | complete | drafted | passed | not started | Begin diagram production. |
+| I | 1-3 | complete | drafted | passed | Chapters 1-3 reviewed | Complete. |
+| II | 4-6 | complete | drafted | passed | Chapters 4-5 reviewed | Produce Chapter 6 diagrams. |
 | III | 7-11 | complete | drafted | passed | not started | Begin diagram production. |
 | IV | 12-15 | complete | drafted | passed | not started | Begin diagram production. |
 
@@ -34,48 +34,48 @@ Scope: required figures declared in `book/chapters/*-brief.md`, plus existing fi
 
 | Figure ID | Purpose | Form | Source | State |
 | --- | --- | --- | --- | --- |
-| `fig-01-visible-vs-hidden-stack` | Contrast LLM user capabilities with system layers. | Stack diagram | `llmsys-01-system-challenges` | specified |
-| `fig-01-token-probability-chain` | Show sequence probability as chained next-token predictions. | Token chain | `llmsys-01-next-token-probability` | specified |
-| `fig-01-abstraction-levels` | Show the abstraction ladder from model behavior to kernels and hardware. | Layered architecture diagram | `llmsys-01-system-challenges` | specified |
-| `fig-01-codesign-loop` | Show model, algorithm, software, hardware feedback loop. | Loop diagram | `llmsys-01-codesign` | specified |
+| `fig-01-visible-vs-hidden-stack` | Contrast LLM user capabilities with system layers. | Stack diagram | `llmsys-01-system-challenges` | artwork-reviewed |
+| `fig-01-token-probability-chain` | Show sequence probability as chained next-token predictions. | Token chain | `llmsys-01-next-token-probability` | artwork-reviewed |
+| `fig-01-abstraction-levels` | Show the abstraction ladder from model behavior to kernels and hardware. | Layered architecture diagram | `llmsys-01-system-challenges` | artwork-reviewed |
+| `fig-01-codesign-loop` | Show model, algorithm, software, hardware feedback loop. | Loop diagram | `llmsys-01-codesign` | artwork-reviewed |
 
 ### Chapter 2 — `02-tokens-probability-transformers`
 
 | Figure ID | Purpose | Form | Source | State |
 | --- | --- | --- | --- | --- |
-| `fig-02-token-to-logits` | Show token -> embedding -> blocks -> logits. | Dataflow | `llmsys-06-transformer-components` | specified |
-| `fig-02-qkv-attention` | Explain Q/K/V projections and weighted value mixing. | Dataflow + tiny matrix | `llmsys-06-transformer-components` | specified |
-| `fig-02-causal-mask` | Show future-token masking before softmax. | Attention matrix | `llmsys-06-masked-self-attention` | specified |
-| `fig-02-model-family-map` | Compare encoder-only, encoder-decoder, decoder-only. | Table | `llmsys-01-decoder-only`; `llmsys-07-t5-text-to-text`; `llmsys-07-llama-architecture` | specified |
+| `fig-02-token-to-logits` | Show token -> embedding -> blocks -> logits. | Dataflow | `llmsys-06-transformer-components` | artwork-reviewed |
+| `fig-02-qkv-attention` | Explain Q/K/V projections and weighted value mixing. | Dataflow + tiny matrix | `llmsys-06-transformer-components` | artwork-reviewed |
+| `fig-02-causal-mask` | Show future-token masking before softmax. | Attention matrix | `llmsys-06-masked-self-attention` | artwork-reviewed |
+| `fig-02-model-family-map` | Compare encoder-only, encoder-decoder, decoder-only. | Table | `llmsys-01-decoder-only`; `llmsys-07-t5-text-to-text`; `llmsys-07-llama-architecture` | artwork-reviewed |
 
 ### Chapter 3 — `03-tokenization-context-decoding`
 
 | Figure ID | Purpose | Form | Source | State |
 | --- | --- | --- | --- | --- |
-| `fig-03-tokenizer-comparison` | Compare word/char/subword tokenization on one sentence. | Table | `llmsys-08-tokenization-tradeoffs` | specified |
-| `fig-03-bpe-loop` | Show BPE merge loop. | Step diagram | `llmsys-08-bpe-algorithm` | specified |
-| `fig-03-decode-methods` | Compare greedy, sampling, beam. | Search diagram | `llmsys-09-beam-search` | specified |
-| `fig-03-speculative-pipeline` | Show draft model and target model validation. | Pipeline | `llmsys-09-speculative-decoding` | specified |
-| `fig-03-eagle-feature-loop` | Show EAGLE as feature-level speculative decoding in an advanced sidebar. | Feature prediction loop | `li-2024-eagle`, `llmsys-09-speculative-decoding` | specified |
+| `fig-03-tokenizer-comparison` | Compare word/char/subword tokenization on one sentence. | Table | `llmsys-08-tokenization-tradeoffs` | artwork-reviewed |
+| `fig-03-bpe-loop` | Show BPE merge loop. | Step diagram | `llmsys-08-bpe-algorithm` | artwork-reviewed |
+| `fig-03-decode-methods` | Compare greedy, sampling, beam. | Search diagram | `llmsys-09-beam-search` | artwork-reviewed |
+| `fig-03-speculative-pipeline` | Show draft model and target model validation. | Pipeline | `llmsys-09-speculative-decoding` | artwork-reviewed |
+| `fig-03-eagle-feature-loop` | Show EAGLE as feature-level speculative decoding in an advanced sidebar. | Feature prediction loop | `li-2024-eagle`, `llmsys-09-speculative-decoding` | artwork-reviewed |
 
 ### Chapter 4 — `04-gpu-programming-model`
 
 | Figure ID | Purpose | Form | Source | State |
 | --- | --- | --- | --- | --- |
-| `fig-04-host-device-lifecycle` | Show CPU allocation/copy/launch/copy/free flow. | Sequence diagram | `llmsys-03-cuda-memory-lifecycle` | caption-reviewed |
-| `fig-04-grid-block-thread` | Show grid, blocks, threads, and one thread's global index. | Hierarchy diagram | `llmsys-02-warp-execution`, `llmsys-03-thread-indexing` | caption-reviewed |
-| `fig-04-sm-warp-scheduling` | Show blocks assigned to SMs and warps executing inside an SM. | Execution schematic | `llmsys-02-gpu-architecture`, `llmsys-02-warp-execution` | caption-reviewed |
-| `fig-04-memory-paths` | Show system memory, PCIe/NVLink, GPU memory, L2, shared memory, registers. | Memory hierarchy diagram | `llmsys-02-cpu-gpu-data-movement`, `llmsys-02-gpu-server-components` | caption-reviewed |
+| `fig-04-host-device-lifecycle` | Show CPU allocation/copy/launch/copy/free flow. | Sequence diagram | `llmsys-03-cuda-memory-lifecycle` | artwork-reviewed |
+| `fig-04-grid-block-thread` | Show grid, blocks, threads, and one thread's global index. | Hierarchy diagram | `llmsys-02-warp-execution`, `llmsys-03-thread-indexing` | artwork-reviewed |
+| `fig-04-sm-warp-scheduling` | Show blocks assigned to SMs and warps executing inside an SM. | Execution schematic | `llmsys-02-gpu-architecture`, `llmsys-02-warp-execution` | artwork-reviewed |
+| `fig-04-memory-paths` | Show system memory, PCIe/NVLink, GPU memory, L2, shared memory, registers. | Memory hierarchy diagram | `llmsys-02-cpu-gpu-data-movement`, `llmsys-02-gpu-server-components` | artwork-reviewed |
 
 ### Chapter 5 — `05-kernels-memory-transformer-blocks`
 
 | Figure ID | Purpose | Form | Source | State |
 | --- | --- | --- | --- | --- |
-| `fig-05-memory-bound-intuition` | Show memory-bound vs compute-bound without full roofline formalism. | Two-region sketch | `llmsys-04-memory-access-efficiency` | caption-reviewed |
-| `fig-05-naive-vs-tiled-matmul` | Compare global-memory reloads with shared-memory tile reuse. | Side-by-side dataflow | `llmsys-04-tiling-shared-memory` | caption-reviewed |
-| `fig-05-coalescing-transpose` | Show coalesced and uncoalesced memory access in matrix transpose. | Warp access diagram | `llmsys-04-coalesced-access` | caption-reviewed |
-| `fig-05-transformer-operator-map` | Map Transformer block operations to GEMM, elementwise, reduction, and memory reuse. | Annotated block diagram | `llmsys-10-transformer-operator-stack` | caption-reviewed |
-| `fig-05-kernel-fusion` | Show two elementwise kernels versus one fused kernel. | Before/after execution trace | `llmsys-10-kernel-fusion` | caption-reviewed |
+| `fig-05-memory-bound-intuition` | Show memory-bound vs compute-bound without full roofline formalism. | Two-region sketch | `llmsys-04-memory-access-efficiency` | artwork-reviewed |
+| `fig-05-naive-vs-tiled-matmul` | Compare global-memory reloads with shared-memory tile reuse. | Side-by-side dataflow | `llmsys-04-tiling-shared-memory` | artwork-reviewed |
+| `fig-05-coalescing-transpose` | Show coalesced and uncoalesced memory access in matrix transpose. | Warp access diagram | `llmsys-04-coalesced-access` | artwork-reviewed |
+| `fig-05-transformer-operator-map` | Map Transformer block operations to GEMM, elementwise, reduction, and memory reuse. | Annotated block diagram | `llmsys-10-transformer-operator-stack` | artwork-reviewed |
+| `fig-05-kernel-fusion` | Show two elementwise kernels versus one fused kernel. | Before/after execution trace | `llmsys-10-kernel-fusion` | artwork-reviewed |
 
 ### Chapter 6 — `06-flashattention-transformer-acceleration`
 
@@ -205,5 +205,5 @@ Owner: Book Architect
 Purpose: Figure production inventory and resumability ledger  
 Evidence grade: A for inventory extracted from chapter briefs and existing figure specs; figure content still inherits source-card evidence from each row  
 Assumptions: Brief tables are canonical after the 2026-07-05 reconciliation pass  
-Open questions: Whether Part I captions should be reviewed before or after Part III/IV specs are drafted  
-Handoff: Next owner should begin diagram production, then run rendered artwork review for terminology drift, formulas, and unsourced numeric claims
+Open questions: Whether final publication layout requires a second export format in addition to editable SVG
+Handoff: Next owner should produce Chapter 2 diagrams and reuse the Chapter 1 type, color, line-weight, and accessibility conventions

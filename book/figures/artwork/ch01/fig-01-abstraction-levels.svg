@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">The LLM systems abstraction ladder</title>
+  <desc id="desc">Product behavior depends on training and inference runtimes, operators, kernels, and accelerator hardware, with bottlenecks crossing layer boundaries.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f8fa; }
+      .layerA { fill: #dcefe5; stroke: #287052; stroke-width: 2; }
+      .layerB { fill: #e8eef9; stroke: #355c9a; stroke-width: 2; }
+      .layerC { fill: #fff0d6; stroke: #9a6518; stroke-width: 2; }
+      .layerD { fill: #ece8f3; stroke: #65517e; stroke-width: 2; }
+      .title { font: 700 30px Arial, sans-serif; fill: #17212b; }
+      .label { font: 700 20px Arial, sans-serif; fill: #17212b; }
+      .body { font: 400 16px Arial, sans-serif; fill: #44515d; }
+      .tag { font: 700 15px Arial, sans-serif; fill: #7a4212; }
+      .arrow { stroke: #53616d; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .bottleneck { stroke: #b54a35; stroke-width: 4; stroke-dasharray: 10 8; fill: none; marker-end: url(#redArrow); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#53616d"/>
+    </marker>
+    <marker id="redArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b54a35"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1200" height="760"/>
+  <text class="title" x="70" y="62">Abstractions organize responsibility, not the bottleneck</text>
+
+  <rect class="layerA" x="150" y="105" width="760" height="92" rx="6"/>
+  <text class="label" x="180" y="143">Product behavior and integration</text>
+  <text class="body" x="180" y="174">User workflow, quality target, latency objective, reliability boundary</text>
+
+  <rect class="layerB" x="150" y="225" width="760" height="105" rx="6"/>
+  <text class="label" x="180" y="263">Training and inference runtimes</text>
+  <text class="body" x="180" y="294">Graphs, batching, scheduling, distributed execution, memory planning</text>
+
+  <rect class="layerC" x="150" y="358" width="760" height="105" rx="6"/>
+  <text class="label" x="180" y="396">Operators and libraries</text>
+  <text class="body" x="180" y="427">Matrix multiplication, attention, normalization, collectives</text>
+
+  <rect class="layerC" x="150" y="491" width="760" height="92" rx="6"/>
+  <text class="label" x="180" y="529">Kernels</text>
+  <text class="body" x="180" y="560">Tiling, fusion, synchronization, memory access, instruction selection</text>
+
+  <rect class="layerD" x="150" y="611" width="760" height="92" rx="6"/>
+  <text class="label" x="180" y="649">GPU / TPU hardware</text>
+  <text class="body" x="180" y="680">Compute units, memory hierarchy, interconnect, execution constraints</text>
+
+  <path class="arrow" d="M530 197 L530 216"/>
+  <path class="arrow" d="M530 330 L530 349"/>
+  <path class="arrow" d="M530 463 L530 482"/>
+  <path class="arrow" d="M530 583 L530 602"/>
+
+  <rect x="955" y="182" width="175" height="310" rx="6" fill="#ffffff" stroke="#b54a35" stroke-width="2"/>
+  <text class="tag" x="980" y="217">ACTIVE</text>
+  <text class="tag" x="980" y="239">BOTTLENECK</text>
+  <text class="body" x="980" y="281">May surface as:</text>
+  <text class="body" x="980" y="317">• latency</text>
+  <text class="body" x="980" y="350">• memory</text>
+  <text class="body" x="980" y="383">• bandwidth</text>
+  <text class="body" x="980" y="416">• communication</text>
+  <text class="body" x="980" y="449">• scheduling</text>
+  <path class="bottleneck" d="M1042 492 C1042 565, 955 605, 890 644"/>
+
+  <text class="body" x="70" y="735">A higher-level symptom can require a lower-level measurement or change.</text>
+</svg>

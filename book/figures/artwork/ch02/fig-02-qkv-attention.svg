@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Single-head query, key, and value attention dataflow</title>
+  <desc id="desc">Input token representations are projected into queries, keys, and values. Query-key similarities become normalized attention weights that mix the value vectors into an output.</desc>
+  <defs>
+    <style>.bg{fill:#f7f8fa}.panel{fill:#fff;stroke:#1f2933;stroke-width:2}.q{fill:#e8eef9;stroke:#355c9a;stroke-width:2}.k{fill:#fff0d6;stroke:#9a6518;stroke-width:2}.v{fill:#dcefe5;stroke:#287052;stroke-width:2}.mix{fill:#ece8f3;stroke:#65517e;stroke-width:2}.title{font:700 30px Arial,sans-serif;fill:#17212b}.section{font:700 20px Arial,sans-serif;fill:#17212b}.label{font:600 18px Arial,sans-serif;fill:#17212b}.small{font:400 15px Arial,sans-serif;fill:#44515d}.math{font:400 17px Arial,sans-serif;fill:#17212b}.arrow{stroke:#53616d;stroke-width:3;fill:none;marker-end:url(#arrow)}.thin{stroke:#8b98a5;stroke-width:1;fill:none}</style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#53616d"/></marker>
+  </defs>
+  <rect class="bg" width="1200" height="760"/><text class="title" x="65" y="62">Attention uses similarity to mix value vectors</text><text class="small" x="65" y="91">One attention head is shown; learned projections create three views of the same input.</text>
+  <rect class="panel" x="65" y="265" width="165" height="130" rx="6"/><text class="section" x="88" y="304">INPUT X</text><text class="small" x="88" y="338">token representations</text><text class="math" x="88" y="370">[T, d_model]</text>
+  <path class="arrow" d="M230 330 L295 180"/><path class="arrow" d="M230 330 L295 330"/><path class="arrow" d="M230 330 L295 480"/>
+  <rect class="q" x="305" y="125" width="180" height="110" rx="6"/><text class="section" x="335" y="164">QUERY Q</text><text class="math" x="339" y="201">Q = X W_Q</text>
+  <rect class="k" x="305" y="275" width="180" height="110" rx="6"/><text class="section" x="346" y="314">KEY K</text><text class="math" x="341" y="351">K = X W_K</text>
+  <rect class="v" x="305" y="425" width="180" height="110" rx="6"/><text class="section" x="337" y="464">VALUE V</text><text class="math" x="342" y="501">V = X W_V</text>
+  <path class="arrow" d="M485 180 L550 253"/><path class="arrow" d="M485 330 L550 287"/>
+  <rect class="panel" x="560" y="190" width="220" height="180" rx="6"/><text class="section" x="592" y="228">SCORE MATRIX</text><text class="math" x="603" y="260">Q K^T / sqrt(d_k)</text>
+  <rect x="605" y="280" width="36" height="28" fill="#dcefe5"/><rect x="643" y="280" width="36" height="28" fill="#fff0d6"/><rect x="681" y="280" width="36" height="28" fill="#e8eef9"/>
+  <rect x="605" y="310" width="36" height="28" fill="#e8eef9"/><rect x="643" y="310" width="36" height="28" fill="#dcefe5"/><rect x="681" y="310" width="36" height="28" fill="#fff0d6"/>
+  <path class="thin" d="M605 280H717V338H605Z M643 280V338 M681 280V338 M605 310H717"/>
+  <path class="arrow" d="M780 280 L835 280"/>
+  <rect class="mix" x="845" y="205" width="170" height="150" rx="6"/><text class="section" x="885" y="245">SOFTMAX</text><text class="small" x="875" y="278">normalize each row</text><text class="math" x="882" y="315">A = softmax(S)</text>
+  <path class="arrow" d="M1015 280 L1060 280"/><path class="arrow" d="M485 480 C760 480 800 420 1060 350"/>
+  <rect class="v" x="1070" y="250" width="100" height="180" rx="6"/><text class="section" x="1085" y="289">MIX</text><text class="math" x="1093" y="330">A V</text><line x1="1090" y1="350" x2="1150" y2="350" stroke="#287052" stroke-width="2"/><text class="small" x="1086" y="382">weighted</text><text class="small" x="1089" y="402">output</text>
+  <rect class="panel" x="560" y="465" width="455" height="135" rx="6"/><text class="section" x="590" y="505">READ ONE OUTPUT ROW</text><text class="math" x="590" y="546">output_i = A_i1 V_1 + A_i2 V_2 + ... + A_iT V_T</text><text class="small" x="590" y="575">Larger normalized weight means that value contributes more.</text>
+  <text class="small" x="65" y="705">Q and K determine how much to read; V determines what content is mixed.</text>
+</svg>

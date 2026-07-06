@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Model, algorithm, software, and hardware co-design loop</title>
+  <desc id="desc">Four equally weighted system layers form a feedback loop around shared constraints including memory, communication, and latency.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f8fa; }
+      .node1 { fill: #dcefe5; stroke: #287052; stroke-width: 3; }
+      .node2 { fill: #e8eef9; stroke: #355c9a; stroke-width: 3; }
+      .node3 { fill: #fff0d6; stroke: #9a6518; stroke-width: 3; }
+      .node4 { fill: #ece8f3; stroke: #65517e; stroke-width: 3; }
+      .center { fill: #ffffff; stroke: #1f2933; stroke-width: 2; }
+      .title { font: 700 30px Arial, sans-serif; fill: #17212b; }
+      .label { font: 700 21px Arial, sans-serif; fill: #17212b; }
+      .body { font: 400 16px Arial, sans-serif; fill: #44515d; }
+      .small { font: 600 16px Arial, sans-serif; fill: #17212b; }
+      .arrow { stroke: #53616d; stroke-width: 4; fill: none; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="9" refY="5.5" orient="auto">
+      <path d="M0,0 L11,5.5 L0,11 z" fill="#53616d"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1200" height="760"/>
+  <text class="title" x="70" y="62">Co-design is a feedback loop across the whole stack</text>
+
+  <rect class="node1" x="430" y="105" width="340" height="112" rx="6"/>
+  <text class="label" x="493" y="148">MODEL ARCHITECTURE</text>
+  <text class="body" x="480" y="181">Dimensions, sparsity, context, state</text>
+
+  <rect class="node2" x="800" y="325" width="320" height="112" rx="6"/>
+  <text class="label" x="886" y="368">ALGORITHM</text>
+  <text class="body" x="837" y="401">Training, decoding, partitioning</text>
+
+  <rect class="node3" x="430" y="545" width="340" height="112" rx="6"/>
+  <text class="label" x="499" y="588">SOFTWARE RUNTIME</text>
+  <text class="body" x="476" y="621">Kernels, compiler, scheduler, cache</text>
+
+  <rect class="node4" x="80" y="325" width="320" height="112" rx="6"/>
+  <text class="label" x="165" y="368">HARDWARE</text>
+  <text class="body" x="118" y="401">Compute, memory, interconnect</text>
+
+  <path class="arrow" d="M770 165 C875 175, 950 235, 966 316"/>
+  <path class="arrow" d="M966 437 C950 515, 875 575, 779 593"/>
+  <path class="arrow" d="M430 601 C326 590, 250 520, 237 446"/>
+  <path class="arrow" d="M237 325 C250 246, 327 181, 421 163"/>
+
+  <circle class="center" cx="600" cy="381" r="112"/>
+  <text class="small" x="554" y="337">SHARED</text>
+  <text class="small" x="533" y="365">CONSTRAINTS</text>
+  <text class="body" x="566" y="402">memory</text>
+  <text class="body" x="548" y="428">communication</text>
+  <text class="body" x="570" y="454">latency</text>
+
+  <text class="body" x="70" y="719">Changing one layer can relieve one constraint while exposing another.</text>
+</svg>

@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Visible behavior and the hidden LLM system stack</title>
+  <desc id="desc">A prompt and response interface above tokenization, model computation, runtime state, data movement, and accelerator execution.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f8fa; }
+      .panel { fill: #ffffff; stroke: #1f2933; stroke-width: 2; }
+      .visible { fill: #dcefe5; stroke: #287052; stroke-width: 2; }
+      .model { fill: #e8eef9; stroke: #355c9a; stroke-width: 2; }
+      .runtime { fill: #fff0d6; stroke: #9a6518; stroke-width: 2; }
+      .hardware { fill: #ece8f3; stroke: #65517e; stroke-width: 2; }
+      .title { font: 700 30px Arial, sans-serif; fill: #17212b; }
+      .section { font: 700 20px Arial, sans-serif; fill: #17212b; }
+      .label { font: 600 18px Arial, sans-serif; fill: #17212b; }
+      .small { font: 400 15px Arial, sans-serif; fill: #44515d; }
+      .arrow { stroke: #53616d; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .flow { stroke: #287052; stroke-width: 4; fill: none; marker-end: url(#greenArrow); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#53616d"/>
+    </marker>
+    <marker id="greenArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#287052"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1200" height="760"/>
+  <text class="title" x="70" y="60">The interface is small; the execution path is not</text>
+
+  <rect class="visible" x="70" y="95" width="1060" height="105" rx="6"/>
+  <text class="section" x="95" y="128">USER-VISIBLE BEHAVIOR</text>
+  <rect class="panel" x="95" y="145" width="250" height="36" rx="4"/>
+  <rect class="panel" x="365" y="145" width="250" height="36" rx="4"/>
+  <rect class="panel" x="635" y="145" width="220" height="36" rx="4"/>
+  <rect class="panel" x="875" y="145" width="230" height="36" rx="4"/>
+  <text class="label" x="151" y="170">Translation</text>
+  <text class="label" x="415" y="170">Summarization</text>
+  <text class="label" x="718" y="170">Code</text>
+  <text class="label" x="947" y="170">Reasoning</text>
+
+  <path class="flow" d="M600 200 L600 239"/>
+
+  <rect class="model" x="70" y="240" width="1060" height="120" rx="6"/>
+  <text class="section" x="95" y="274">MODEL PATH</text>
+  <rect class="panel" x="95" y="295" width="205" height="44" rx="4"/>
+  <rect class="panel" x="355" y="295" width="205" height="44" rx="4"/>
+  <rect class="panel" x="615" y="295" width="230" height="44" rx="4"/>
+  <rect class="panel" x="900" y="295" width="205" height="44" rx="4"/>
+  <text class="label" x="139" y="323">Tokenization</text>
+  <text class="label" x="405" y="323">Embeddings</text>
+  <text class="label" x="646" y="323">Transformer blocks</text>
+  <text class="label" x="967" y="323">Logits</text>
+  <path class="arrow" d="M300 317 L346 317"/>
+  <path class="arrow" d="M560 317 L606 317"/>
+  <path class="arrow" d="M845 317 L891 317"/>
+
+  <rect class="runtime" x="70" y="390" width="1060" height="125" rx="6"/>
+  <text class="section" x="95" y="424">RUNTIME AND SERVING STATE</text>
+  <rect class="panel" x="95" y="448" width="230" height="45" rx="4"/>
+  <rect class="panel" x="355" y="448" width="230" height="45" rx="4"/>
+  <rect class="panel" x="615" y="448" width="230" height="45" rx="4"/>
+  <rect class="panel" x="875" y="448" width="230" height="45" rx="4"/>
+  <text class="label" x="150" y="477">Scheduling</text>
+  <text class="label" x="413" y="477">Batching</text>
+  <text class="label" x="680" y="477">KV cache</text>
+  <text class="label" x="922" y="477">Memory allocation</text>
+
+  <path class="arrow" d="M600 360 L600 382"/>
+  <path class="arrow" d="M600 515 L600 542"/>
+
+  <rect class="hardware" x="70" y="545" width="1060" height="140" rx="6"/>
+  <text class="section" x="95" y="579">DATA MOVEMENT AND HARDWARE</text>
+  <rect class="panel" x="95" y="605" width="220" height="52" rx="4"/>
+  <rect class="panel" x="365" y="605" width="220" height="52" rx="4"/>
+  <rect class="panel" x="635" y="605" width="220" height="52" rx="4"/>
+  <rect class="panel" x="905" y="605" width="200" height="52" rx="4"/>
+  <text class="label" x="158" y="637">Kernels</text>
+  <text class="label" x="414" y="637">GPU memory</text>
+  <text class="label" x="699" y="637">Interconnect</text>
+  <text class="label" x="954" y="637">Accelerators</text>
+
+  <text class="small" x="70" y="724">A bottleneck can emerge at any layer along this path.</text>
+</svg>

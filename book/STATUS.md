@@ -4,14 +4,14 @@ Project: **Large Language Model Systems: From Tokens to Serving Infrastructure**
 
 This file is the resumability ledger. Update it after each chapter stage clears.
 
-**Last updated:** 2026-07-05
+**Last updated:** 2026-07-06
 
 ## Current Focus
 
 - Build source ledger from `downloads/llmsystem2026spring/source_pdfs/`.
 - Confirm the spine in `book/spine.yml`.
 - Book-level consistency audit completed after all 15 chapters reached ready; next focus is figure production, final copyedit, or reference-generation pipeline.
-- Figure production inventory completed in `book/figures/FIGURE_STATUS.md`; all four part-level figure specs are drafted, all part-level caption reviews have passed, and next focus is diagram production plus rendered artwork review.
+- Figure production is in progress. Chapters 1-5 have twenty-two artwork-reviewed editable SVG diagrams; next focus is Chapter 6 diagram production.
 
 ## Chapter Status
 

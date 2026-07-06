@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Transformer forward path from token IDs to vocabulary logits</title>
+  <desc id="desc">Token IDs index an embedding table, positional information is added, repeated Transformer blocks produce hidden states, and a linear vocabulary head produces one score per vocabulary item.</desc>
+  <defs>
+    <style>
+      .bg{fill:#f7f8fa}.panel{fill:#fff;stroke:#1f2933;stroke-width:2}.model{fill:#e8eef9;stroke:#355c9a;stroke-width:2}.runtime{fill:#fff0d6;stroke:#9a6518;stroke-width:2}.output{fill:#dcefe5;stroke:#287052;stroke-width:2}.title{font:700 30px Arial,sans-serif;fill:#17212b}.section{font:700 20px Arial,sans-serif;fill:#17212b}.label{font:600 18px Arial,sans-serif;fill:#17212b}.small{font:400 15px Arial,sans-serif;fill:#44515d}.math{font:400 17px Arial,sans-serif;fill:#355c9a}.arrow{stroke:#53616d;stroke-width:3;fill:none;marker-end:url(#arrow)}
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#53616d"/></marker>
+  </defs>
+  <rect class="bg" width="1200" height="760"/>
+  <text class="title" x="65" y="62">A Transformer maps token IDs to vocabulary scores</text>
+  <text class="small" x="65" y="91">The same repeated tensor path produces a hidden state at every sequence position.</text>
+
+  <rect class="panel" x="65" y="160" width="145" height="170" rx="6"/>
+  <text class="section" x="92" y="197">TOKEN IDs</text>
+  <rect class="runtime" x="92" y="220" width="90" height="34" rx="4"/><text class="label" x="120" y="243">17</text>
+  <rect class="runtime" x="92" y="264" width="90" height="34" rx="4"/><text class="label" x="120" y="287">804</text>
+  <text class="small" x="92" y="317">shape: [T]</text>
+
+  <path class="arrow" d="M210 245 L266 245"/>
+  <rect class="model" x="275" y="145" width="190" height="200" rx="6"/>
+  <text class="section" x="313" y="184">EMBEDDING</text>
+  <rect class="panel" x="305" y="207" width="130" height="70" rx="4"/>
+  <path d="M320 222 H420 M320 242 H420 M320 262 H420 M345 212 V272 M370 212 V272 M395 212 V272" stroke="#8b98a5" stroke-width="1"/>
+  <text class="small" x="307" y="302">table lookup</text>
+  <text class="small" x="307" y="323">+ position</text>
+
+  <path class="arrow" d="M465 245 L521 245"/>
+  <rect class="model" x="530" y="115" width="235" height="260" rx="6"/>
+  <text class="section" x="566" y="153">TRANSFORMER BLOCK</text>
+  <rect class="panel" x="565" y="178" width="165" height="46" rx="4"/><text class="label" x="610" y="207">Attention</text>
+  <path class="arrow" d="M647 224 L647 251"/>
+  <rect class="panel" x="565" y="260" width="165" height="46" rx="4"/><text class="label" x="624" y="289">FFN</text>
+  <text class="small" x="565" y="334">residual + normalization</text>
+  <text class="math" x="611" y="363">repeat N times</text>
+
+  <path class="arrow" d="M765 245 L821 245"/>
+  <rect class="runtime" x="830" y="145" width="150" height="200" rx="6"/>
+  <text class="section" x="857" y="184">LINEAR</text>
+  <text class="section" x="855" y="209">HEAD</text>
+  <text class="math" x="862" y="252">h W_vocab</text>
+  <line x1="855" y1="270" x2="955" y2="270" stroke="#9a6518" stroke-width="2"/>
+  <text class="small" x="850" y="300">hidden width</text>
+  <text class="small" x="872" y="322">to |V|</text>
+
+  <path class="arrow" d="M980 245 L1026 245"/>
+  <rect class="output" x="1035" y="130" width="110" height="230" rx="6"/>
+  <text class="section" x="1051" y="169">LOGITS</text>
+  <rect class="panel" x="1057" y="194" width="66" height="32" rx="3"/><text class="small" x="1071" y="215">2.1</text>
+  <rect class="panel" x="1057" y="236" width="66" height="32" rx="3"/><text class="small" x="1067" y="257">-0.4</text>
+  <rect class="panel" x="1057" y="278" width="66" height="32" rx="3"/><text class="small" x="1071" y="299">0.8</text>
+  <text class="small" x="1065" y="337">one per</text><text class="small" x="1060" y="355">vocabulary</text>
+
+  <rect class="panel" x="275" y="455" width="870" height="160" rx="6"/>
+  <text class="section" x="305" y="493">SHAPE TRANSFORMATION</text>
+  <text class="label" x="315" y="545">[T]</text><path class="arrow" d="M365 539 L455 539"/>
+  <text class="label" x="480" y="545">[T, d_model]</text><path class="arrow" d="M610 539 L705 539"/>
+  <text class="label" x="730" y="545">[T, d_model]</text><path class="arrow" d="M865 539 L955 539"/>
+  <text class="label" x="980" y="545">[T, |V|]</text>
+  <text class="small" x="305" y="585">Softmax converts logits to a probability distribution when probabilities are needed.</text>
+  <text class="small" x="65" y="705">T = sequence length; d_model = hidden width; |V| = vocabulary size.</text>
+</svg>

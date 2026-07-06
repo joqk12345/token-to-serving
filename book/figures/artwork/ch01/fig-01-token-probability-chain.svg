@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Sequence probability as conditional next-token probabilities</title>
+  <desc id="desc">A short token sequence is factored into a product of probabilities conditioned on prior tokens.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f8fa; }
+      .token { fill: #ffffff; stroke: #355c9a; stroke-width: 2; }
+      .context { fill: #e8eef9; stroke: #355c9a; stroke-width: 2; }
+      .next { fill: #dcefe5; stroke: #287052; stroke-width: 3; }
+      .formula { fill: #ffffff; stroke: #1f2933; stroke-width: 2; }
+      .title { font: 700 30px Arial, sans-serif; fill: #17212b; }
+      .label { font: 600 19px Arial, sans-serif; fill: #17212b; }
+      .small { font: 400 15px Arial, sans-serif; fill: #44515d; }
+      .math { font: 400 25px Georgia, serif; fill: #17212b; }
+      .arrow { stroke: #53616d; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#53616d"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1200" height="760"/>
+  <text class="title" x="70" y="65">A sequence is built one conditional prediction at a time</text>
+
+  <text class="label" x="70" y="125">Example token sequence</text>
+  <rect class="token" x="70" y="150" width="145" height="66" rx="5"/>
+  <rect class="token" x="255" y="150" width="145" height="66" rx="5"/>
+  <rect class="token" x="440" y="150" width="145" height="66" rx="5"/>
+  <rect class="token" x="625" y="150" width="145" height="66" rx="5"/>
+  <rect class="token" x="810" y="150" width="145" height="66" rx="5"/>
+  <rect class="token" x="995" y="150" width="135" height="66" rx="5"/>
+  <text class="label" x="104" y="191">The</text>
+  <text class="label" x="291" y="191">model</text>
+  <text class="label" x="477" y="191">moves</text>
+  <text class="label" x="671" y="191">one</text>
+  <text class="label" x="844" y="191">token</text>
+  <text class="label" x="1020" y="191">ahead</text>
+  <path class="arrow" d="M215 183 L246 183"/>
+  <path class="arrow" d="M400 183 L431 183"/>
+  <path class="arrow" d="M585 183 L616 183"/>
+  <path class="arrow" d="M770 183 L801 183"/>
+  <path class="arrow" d="M955 183 L986 183"/>
+  <text class="small" x="70" y="244">Token boundaries are illustrative.</text>
+
+  <text class="label" x="70" y="305">One prediction step</text>
+  <rect class="context" x="70" y="330" width="505" height="92" rx="5"/>
+  <text class="small" x="95" y="360">PREVIOUS CONTEXT</text>
+  <text class="label" x="95" y="397">The  |  model  |  moves  |  one</text>
+  <path class="arrow" d="M575 376 L665 376"/>
+  <rect class="next" x="665" y="330" width="205" height="92" rx="5"/>
+  <text class="small" x="690" y="360">NEXT TOKEN</text>
+  <text class="label" x="690" y="397">token</text>
+  <text class="math" x="905" y="385">p(token | context)</text>
+
+  <rect class="formula" x="70" y="485" width="1060" height="155" rx="6"/>
+  <text class="label" x="95" y="523">Sequence probability</text>
+  <text class="math" x="95" y="574">p(x₁, x₂, …, xₜ) = p(x₁) · p(x₂ | x₁) · … · p(xₜ | x₁, …, xₜ₋₁)</text>
+  <text class="small" x="95" y="612">Each factor scores one token under the context that precedes it.</text>
+
+  <text class="small" x="70" y="701">Training aggregates these conditional prediction errors across many token positions and sequences.</text>
+</svg>
