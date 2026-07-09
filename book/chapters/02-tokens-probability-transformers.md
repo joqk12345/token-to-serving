@@ -43,6 +43,8 @@ The implementation problem is to turn the prefix into a useful representation be
 
 A neural network cannot directly multiply the string `"Pittsburgh"` or the token ID `19437`. It needs vectors.
 
+![Token IDs are mapped to embeddings, transformed by repeated Transformer blocks, and projected to logits over the model vocabulary.](../figures/artwork/ch02/fig-02-token-to-logits.svg)
+
 The first step is an embedding lookup. Each token ID indexes a learned row in an embedding table. If the model dimension is `d_model`, each token becomes a vector of length `d_model`.
 
 At this point, the model knows which token appears at each position, but not enough about where it appears. The same token may mean different things at different positions. Transformer models therefore add some form of positional information to token embeddings. The original Transformer used sinusoidal positional encodings; modern LLMs often use relative-position mechanisms such as Rotary Positional Embeddings. The LLaMA paper uses RoPE in its decoder-only architecture, and the RoFormer paper gives the primary RoPE formulation. [CITE: llmsys-07-llama-architecture; su-2021-roformer-rope]
@@ -58,6 +60,8 @@ Most of the rest of the model repeatedly transforms this matrix.
 ## Attention Mixes Positions
 
 A token representation by itself is not enough. The representation for `"bridges"` should depend on whether the prefix is about Pittsburgh, dentistry, networking, or a card game.
+
+![Self-attention projects input vectors into queries, keys, and values; query-key scores become weights that mix value vectors into an output representation.](../figures/artwork/ch02/fig-02-qkv-attention.svg)
 
 Attention is the mechanism that lets each position read from other positions.
 
@@ -76,6 +80,8 @@ This is not just a modeling trick. It defines the model's central workload. Atte
 ## The Decoder Cannot Look Right
 
 For an autoregressive decoder, attention needs a rule: position `t` may attend to positions `<= t`, but not to future positions.
+
+![A causal mask prevents each position from attending to future positions, preserving the left-to-right dependency used for autoregressive generation.](../figures/artwork/ch02/fig-02-causal-mask.svg)
 
 Decoder self-attention masks the right side before softmax by assigning those positions negative infinity. The original Transformer paper is the primary anchor for causal masking in the decoder. [CITE: llmsys-06-masked-self-attention; vaswani-2017-attention-is-all-you-need]
 
@@ -128,6 +134,8 @@ The system implication is useful: training can evaluate many token positions in 
 ## Encoder-Decoder, Decoder-Only, and Why the Difference Matters
 
 The Transformer family includes more than one architecture.
+
+![Encoder-only, encoder-decoder, and decoder-only models differ in how they condition on input tokens and produce output tokens.](../figures/artwork/ch02/fig-02-model-family-map.svg)
 
 Encoder-decoder models read an input sequence with an encoder and generate an output sequence with a decoder. T5 uses a standard encoder-decoder Transformer using a unified text-to-text format, and the T5 paper is the primary source for that formulation. [CITE: llmsys-07-t5-text-to-text; raffel-2020-t5]
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -74,12 +75,57 @@ def check_status_chapter_count() -> list[str]:
     return []
 
 
+def check_generated_references() -> list[str]:
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/generate_references.py"), "--check"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        return [fail(f"generated references invalid: {detail}")]
+    return []
+
+
+def check_generated_index() -> list[str]:
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/generate_index.py"), "--check"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        return [fail(f"generated index invalid: {detail}")]
+    return []
+
+
+def check_generated_book_export() -> list[str]:
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/generate_book_export.py"), "--check"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        return [fail(f"book export invalid: {detail}")]
+    return []
+
+
 def main() -> int:
     errors: list[str] = []
     errors.extend(check_required_files())
     errors.extend(check_import_files())
     errors.extend(check_source_cards())
     errors.extend(check_status_chapter_count())
+    errors.extend(check_generated_references())
+    errors.extend(check_generated_index())
+    errors.extend(check_generated_book_export())
 
     if errors:
         print("\n".join(errors))
@@ -90,4 +136,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

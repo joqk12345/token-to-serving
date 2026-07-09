@@ -36,6 +36,8 @@ This chapter is about that schedule.
 
 Suppose there are `W` workers. Each worker has a replica of the same model parameters `θ`. A global batch is split into `W` local batches:
 
+![Data parallel training runs model replicas on different data shards, computes local gradients, aggregates them with all-reduce, and applies the synchronized update on each worker.](../figures/artwork/ch08/fig-08-data-parallel-step.svg)
+
 ```text
 B = B_0 ∪ B_1 ∪ ... ∪ B_{W-1}
 ```
@@ -74,6 +76,8 @@ The synchronization term is now on the critical path.
 
 Distributed training relies on collective communication. NCCL is a common GPU communication library; the lecture introduces NCCL as providing inter-GPU communication APIs, including collective and point-to-point primitives. [CITE: llmsys-14-nccl-communication] NVIDIA's NCCL documentation lists collective operations including all-reduce, broadcast, reduce, all-gather, and reduce-scatter. [CITE: official-nvidia-nccl-collectives]
 
+![Broadcast, reduce, all-reduce, reduce-scatter, and all-gather differ in which workers own full tensors or shards before and after communication.](../figures/artwork/ch08/fig-08-collective-semantics.svg)
+
 The key collective for synchronous data parallelism is all-reduce.
 
 In a reduce operation, several ranks contribute values and one rank receives the reduced result. In a broadcast, one rank sends a value to all ranks. All-reduce combines those ideas: every rank contributes, the values are reduced, and every rank receives the result. The lecture defines all-reduce this way and also presents all-reduce as reduce-scatter followed by all-gather. [CITE: llmsys-14-allreduce-semantics]
@@ -104,6 +108,8 @@ That average matters. PyTorch's DDP documentation warns that gradient magnitude 
 ## Ring All-Reduce Is a Schedule
 
 An all-reduce call looks like one operation at the API level. Underneath, it is a communication schedule.
+
+![Ring all-reduce circulates tensor chunks through scatter-reduce and all-gather phases so each worker receives the reduced result.](../figures/artwork/ch08/fig-08-ring-allreduce.svg)
 
 The distributed training lecture explains ring all-reduce through two phases: scatter-reduce and all-gather. [CITE: llmsys-14-ring-allreduce-phases]
 
@@ -142,6 +148,8 @@ PyTorch DDP follows the all-reduce data-parallel pattern.
 ## The Naive DDP Critical Path
 
 PyTorch `DistributedDataParallel` implements module-level data parallelism with gradient synchronization across model replicas. The official docs define it as data parallelism based on `torch.distributed` and note that the user is responsible for splitting inputs across participating GPUs. [CITE: official-pytorch-ddp-docs]
+
+![Naive DDP waits until backward computation finishes before reducing gradients, while bucketed DDP can start asynchronous all-reduce as buckets become ready.](../figures/artwork/ch08/fig-08-naive-vs-overlap-ddp.svg)
 
 The DDP lecture describes the standard structure: replicas run forward and backward independently, gradients are averaged across nodes, and optimizers run locally with identical updates. [CITE: llmsys-15-ddp-replica-gradient-average]
 
@@ -190,6 +198,8 @@ The communication has not disappeared. It has been moved under computation where
 ## Autograd Hooks Make Communication Timely
 
 Chapter 7 described frameworks as systems that can intercept computation. DDP is a concrete example.
+
+![PyTorch DDP uses autograd hooks and reducer buckets to trigger asynchronous all-reduce when a bucket's gradients are ready.](../figures/artwork/ch08/fig-08-ddp-reducer-hooks.svg)
 
 The DDP lecture shows reducer pseudocode built around autograd hooks. When a parameter's gradient has accumulated, an `autograd_hook` marks the variable ready. Buckets track pending gradients. When a bucket's pending count reaches zero, DDP marks the bucket ready and launches communication for that bucket. [CITE: llmsys-15-ddp-autograd-hooks]
 

@@ -4,14 +4,19 @@ Project: **Large Language Model Systems: From Tokens to Serving Infrastructure**
 
 This file is the resumability ledger. Update it after each chapter stage clears.
 
-**Last updated:** 2026-07-06
+**Last updated:** 2026-07-09
 
 ## Current Focus
 
 - Build source ledger from `downloads/llmsystem2026spring/source_pdfs/`.
 - Confirm the spine in `book/spine.yml`.
-- Book-level consistency audit completed after all 15 chapters reached ready; next focus is figure production, final copyedit, or reference-generation pipeline.
-- Figure production is in progress. Chapters 1-5 have twenty-two artwork-reviewed editable SVG diagrams; next focus is Chapter 6 diagram production.
+- Book-level consistency audit completed after all 15 chapters reached ready.
+- Figure production is complete. All 15 chapters have eighty-eight artwork-reviewed editable SVG diagrams.
+- Reference-generation pipeline is complete: 219 cited source cards resolve to 63 deduplicated works in `book/REFERENCES.md`; workspace validation checks citation resolution and generated-file freshness.
+- Index-generation pipeline is complete: `book/INDEX.md` is derived from chapter headings and the terminology registry, and workspace validation checks that it stays current.
+- Book-export pipeline is complete: `book/export/book-source.md` and `book/export/book.html` are assembled with pandoc, include the references and index, and pass freshness checks.
+- Final copyedit pass is complete: chapter terminology, citation resolution, handoff blocks, unresolved markers, duplicate words, and mechanical whitespace checks pass.
+- Next focus: publisher-specific citation styling or adding a PDF/print backend if one becomes available.
 
 ## Chapter Status
 

@@ -1,0 +1,213 @@
+# Canonical figure placement for chapter drafts and book export.
+# Each entry inserts a markdown image figure after the first paragraph
+# of the named H2 section (or after the intro block when after_heading is null).
+#
+# Source of captions: process/review-memos/part-*-figure-caption-review-*.md
+# Artwork: book/figures/artwork/chNN/fig-*.svg
+
+chapters:
+  "01-why-llm-systems.md":
+    - id: fig-01-visible-vs-hidden-stack
+      after_heading: "Capability Is Not the Same as Infrastructure"
+    - id: fig-01-token-probability-chain
+      after_heading: "The Simple Contract"
+    - id: fig-01-abstraction-levels
+      after_heading: "Abstractions Decide What Engineers Can Build"
+    - id: fig-01-codesign-loop
+      after_heading: "Co-Design Is the Pattern"
+
+  "02-tokens-probability-transformers.md":
+    - id: fig-02-token-to-logits
+      after_heading: "Tokens Become Vectors"
+    - id: fig-02-qkv-attention
+      after_heading: "Attention Mixes Positions"
+    - id: fig-02-causal-mask
+      after_heading: "The Decoder Cannot Look Right"
+    - id: fig-02-model-family-map
+      after_heading: "Encoder-Decoder, Decoder-Only, and Why the Difference Matters"
+
+  "03-tokenization-context-decoding.md":
+    - id: fig-03-tokenizer-comparison
+      after_heading: "Tokens Are Not Words"
+    - id: fig-03-bpe-loop
+      after_heading: "BPE as a Compression Habit"
+    - id: fig-03-decode-methods
+      after_heading: "Decoding Turns Probabilities Into Text"
+    - id: fig-03-speculative-pipeline
+      after_heading: "Speculative Decoding Changes the Work Shape"
+    - id: fig-03-eagle-feature-loop
+      after_heading: "Advanced Sidebar: EAGLE as a Hint of the Direction"
+
+  "04-gpu-programming-model.md":
+    - id: fig-04-host-device-lifecycle
+      after_heading: "Host and Device"
+    - id: fig-04-grid-block-thread
+      after_heading: "Launching Parallel Work"
+    - id: fig-04-sm-warp-scheduling
+      after_heading: "SMs, Warps, and SIMT"
+    - id: fig-04-memory-paths
+      after_heading: "Memory Is Part of the Program"
+
+  "05-kernels-memory-transformer-blocks.md":
+    - id: fig-05-memory-bound-intuition
+      after_heading: "Memory-Bound Is a Real Category"
+    - id: fig-05-naive-vs-tiled-matmul
+      after_heading: "Naive Matrix Multiplication Wastes Reuse"
+    - id: fig-05-coalescing-transpose
+      after_heading: "Layout Decides Whether Warps Load Efficiently"
+    - id: fig-05-transformer-operator-map
+      after_heading: "Transformer Blocks Are Mixed Workloads"
+    - id: fig-05-kernel-fusion
+      after_heading: "Kernel Fusion Removes Unnecessary Boundaries"
+
+  "06-flashattention-transformer-acceleration.md":
+    - id: fig-06-standard-attention-hbm
+      after_heading: "Standard Attention Materializes the Problem"
+    - id: fig-06-flashattention-tiling
+      after_heading: "Tiling Attention"
+    - id: fig-06-online-softmax
+      after_heading: "Online Softmax Makes Blocks Exact"
+    - id: fig-06-forward-backward-memory
+      after_heading: "Backward Uses Recomputation"
+    - id: fig-06-modern-hardware-sidebar
+      after_heading: "Modern Hardware Keeps Moving"
+
+  "07-dl-frameworks-and-compilers.md":
+    - id: fig-07-python-to-device-program
+      after_heading: "The Model Is Python; the Machine Wants a Program"
+    - id: fig-07-forward-to-backward-graph
+      after_heading: "Autodiff Is a Program Transformation"
+    - id: fig-07-ir-stack
+      after_heading: "StableHLO and HLO Are Compiler Boundaries"
+    - id: fig-07-xla-memory-planning
+      after_heading: "Fusion Is a Memory Decision"
+    - id: fig-07-tpu-systolic-compile-target
+      after_heading: "TPU Shows Why the Backend Matters"
+    - id: fig-07-pallas-blockspec-grid
+      after_heading: "Pallas: Grid, Blocks, and Memory Movement"
+    - id: fig-07-pallas-pipeline
+      after_heading: "Pipelining Hides Transfer Latency"
+
+  "08-distributed-training-ddp.md":
+    - id: fig-08-data-parallel-step
+      after_heading: "Replicating the Model Is the Easy Part"
+    - id: fig-08-collective-semantics
+      after_heading: "All-Reduce Is the Central Collective"
+    - id: fig-08-ring-allreduce
+      after_heading: "Ring All-Reduce Is a Schedule"
+    - id: fig-08-naive-vs-overlap-ddp
+      after_heading: "The Naive DDP Critical Path"
+    - id: fig-08-ddp-reducer-hooks
+      after_heading: "Autograd Hooks Make Communication Timely"
+
+  "09-model-parallelism.md":
+    - id: fig-09-data-vs-model-parallel
+      after_heading: "Data Parallelism Replicates; Model Parallelism Partitions"
+    - id: fig-09-naive-pipeline-bubble
+      after_heading: "The Naive Pipeline Wastes Devices"
+    - id: fig-09-gpipe-microbatches
+      after_heading: "Micro-Batching Fills the Pipeline"
+    - id: fig-09-1f1b-vs-gpipe
+      after_heading: "1F1B Starts Backward Earlier"
+    - id: fig-09-tensor-parallel-ffn
+      after_heading: "Transformer FFN Tensor Parallelism"
+    - id: fig-09-tensor-parallel-attention-heads
+      after_heading: "Attention Head Parallelism"
+    - id: fig-09-3d-parallelism
+      after_heading: "Combining Tensor, Pipeline, and Data Parallelism"
+
+  "10-zero-moe-and-memory.md":
+    - id: fig-10-ddp-memory-ledger
+      after_heading: "The Memory Ledger After Model Parallelism"
+    - id: fig-10-zero-stages
+      after_heading: "ZeRO: Remove Redundant State"
+    - id: fig-10-zero3-parameter-gather
+      after_heading: "ZeRO-3 Partitions Parameters"
+    - id: fig-10-moe-router-experts
+      after_heading: "MoE: Store Capacity, Activate Sparsely"
+    - id: fig-10-expert-parallel-alltoall
+      after_heading: "Expert Parallelism and All-to-All"
+    - id: fig-10-load-balance-skew
+      after_heading: "Routing Is a Systems Problem"
+
+  "11-quantization-and-peft.md":
+    - id: fig-11-quantization-map
+      after_heading: "Quantization Changes Representation"
+    - id: fig-11-quantization-error
+      after_heading: "Scale, Zero Point, and Error"
+    - id: fig-11-llmint8-outlier-path
+      after_heading: "ZeroQuant and LLM.int8 Show Two Scaling Tactics"
+    - id: fig-11-gptq-compensation
+      after_heading: "GPTQ: Quantize, Measure Error, Compensate"
+    - id: fig-11-full-ft-vs-lora-state
+      after_heading: "Full Fine-Tuning Carries Full Training State"
+    - id: fig-11-lora-update
+      after_heading: "LoRA: Low-Rank Updates"
+    - id: fig-11-qlora-stack
+      after_heading: "QLoRA Combines Quantization and Low-Rank Training"
+
+  "12-inference-cost-model.md":
+    - id: fig-12-prefill-decode
+      after_heading: "Autoregressive Inference Has Two Phases"
+    - id: fig-12-request-level-batching-problem
+      after_heading: "Why Request-Level Batching Fails"
+    - id: fig-12-continuous-batching
+      after_heading: "Continuous Batching"
+    - id: fig-12-selective-batching
+      after_heading: "Selective Batching"
+    - id: fig-12-scheduler-loop
+      after_heading: "The Scheduler Is Part of the Critical Path"
+    - id: fig-12-kv-cache-cost
+      after_heading: "KV Cache Is Serving Memory"
+    - id: fig-12-prefix-cache-routing
+      after_heading: "Prefix Reuse and Cache-Aware Scheduling"
+
+  "13-kv-cache-vllm-pagedattention.md":
+    - id: fig-13-kv-cache-growth
+      after_heading: "Why KV Cache Becomes the Serving Memory Problem"
+    - id: fig-13-contiguous-fragmentation
+      after_heading: "Why Contiguous Allocation Fails"
+    - id: fig-13-kv-blocks
+      after_heading: "KV Blocks"
+    - id: fig-13-block-table
+      after_heading: "Logical Blocks and Physical Blocks"
+    - id: fig-13-pagedattention-kernel
+      after_heading: "PagedAttention as a Kernel Contract"
+    - id: fig-13-fragmentation-boundary
+      after_heading: "Fragmentation After Paging"
+    - id: fig-13-prefix-sharing
+      after_heading: "Sharing KV Blocks"
+    - id: fig-13-preemption-recovery
+      after_heading: "Memory Pressure, Preemption, and Recovery"
+    - id: fig-13-vllm-engine-boundary
+      after_heading: "vLLM Around PagedAttention"
+
+  "14-serving-scheduling-and-disaggregation.md":
+    - id: fig-14-throughput-vs-goodput
+      after_heading: "Inference at Scale Is Not Training at Scale"
+    - id: fig-14-ttft-tpot
+      after_heading: "TTFT, TPOT, and Goodput"
+    - id: fig-14-prefill-decode-interference
+      after_heading: "Prefill and Decode Want Different Systems"
+    - id: fig-14-pd-disaggregation
+      after_heading: "Disaggregated Prefill and Decode"
+    - id: fig-14-placement-problem
+      after_heading: "Placement Is Part of the Algorithm"
+    - id: fig-14-kv-aware-routing
+      after_heading: "KV-Aware Routing"
+    - id: fig-14-external-kv-manager
+      after_heading: "KV Cache Becomes External Data"
+    - id: fig-14-kv-memory-hierarchy
+      after_heading: "Memory Tiers and Transfer"
+    - id: fig-14-transfer-substrate
+      after_heading: "Transfer Substrates"
+
+  "15-llm-system-codesign.md":
+    - id: fig-15-stack-recap
+      after_heading: "The Simple Objective Becomes a Stack"
+    - id: fig-15-codesign-loop
+      after_heading: "Co-Design Means Joint Constraints"
+    - id: fig-15-bottleneck-routing
+      after_heading: "Bottleneck Ownership"
+    - id: fig-15-optimization-moves-bottleneck
+      after_heading: "Scaling Up and Scaling Down"

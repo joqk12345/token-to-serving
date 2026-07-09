@@ -14,7 +14,7 @@ technical_depth: intermediate-to-advanced
 
 # KV Cache, PagedAttention, and vLLM
 
-Chapter 12 described inference as an online cost model: prefill, decode, batching, scheduling, and KV-cache memory all interact. This chapter zooms into the memory term.
+Chapter 12 described inference as an online cost model: prefill, decode, batching, scheduling, and KV cache memory all interact. This chapter zooms into the memory term.
 
 The important shift is simple:
 
@@ -25,13 +25,15 @@ KV cache is persistent serving state.
 
 During autoregressive decoding, each active request accumulates key and value tensors that later decode steps need. Those tensors live across model iterations. A serving engine therefore has to decide where they live, how they grow, when they can be shared, and what happens when the GPU runs out of available cache space.
 
-The vLLM lecture states that attention KV cache stores per-token attention key/value state during inference. [CITE: llmsys-24-kv-cache-serving-state] It also frames efficient KV-cache management as crucial for high-throughput LLM serving. [CITE: llmsys-24-kv-cache-memory-management] The original PagedAttention paper makes the same problem central: dynamic KV-cache growth and fragmentation limit useful batching, and vLLM addresses that bottleneck with a new KV-cache memory-management design. [CITE: kwon-2023-pagedattention]
+The vLLM lecture states that attention KV cache stores per-token attention key/value state during inference. [CITE: llmsys-24-kv-cache-serving-state] It also frames efficient KV cache management as crucial for high-throughput LLM serving. [CITE: llmsys-24-kv-cache-memory-management] The original PagedAttention paper makes the same problem central: dynamic KV cache growth and fragmentation limit useful batching, and vLLM addresses that bottleneck with a new KV cache memory-management design. [CITE: kwon-2023-pagedattention]
 
 The core idea is to stop treating a request's KV cache as one large contiguous tensor reservation. PagedAttention splits KV cache into fixed-size blocks, maps a request's logical blocks to physical GPU-memory blocks, and teaches the attention kernel how to read through that mapping. [CITE: llmsys-24-pagedattention-definition]
 
 ## Why KV Cache Becomes the Serving Memory Problem
 
 Model parameters are large, but they are mostly stable during serving. They are loaded once per worker or sharded across workers, then reused across requests.
+
+![KV cache is serving state that grows with active sequence context across model layers as new tokens are generated.](../figures/artwork/ch13/fig-13-kv-cache-growth.svg)
 
 KV cache is different. It grows with the live workload:
 
@@ -43,7 +45,7 @@ more layers / KV heads    -> more state per token
 larger element precision  -> more bytes per state value
 ```
 
-The vLLM lecture frames inference pressure as increasing with model size, context length, and generated-token count. [CITE: llmsys-24-inference-scaling-pressure] The memory consequence is that a server may have enough arithmetic capacity to continue decoding, but not enough useful KV-cache space to keep more requests resident.
+The vLLM lecture frames inference pressure as increasing with model size, context length, and generated-token count. [CITE: llmsys-24-inference-scaling-pressure] The memory consequence is that a server may have enough arithmetic capacity to continue decoding, but not enough useful KV cache space to keep more requests resident.
 
 This is why serving cannot be described as:
 
@@ -61,15 +63,17 @@ serving memory =
   + runtime and scheduler state
 ```
 
-The KV-cache term changes every time requests arrive, finish, or generate another token.
+The KV cache term changes every time requests arrive, finish, or generate another token.
 
 ## Why Contiguous Allocation Fails
 
-A straightforward allocator can reserve one contiguous KV-cache region for each request. If the engine knows the request will never exceed a fixed maximum length, it can reserve enough space for that maximum.
+A straightforward allocator can reserve one contiguous KV cache region for each request. If the engine knows the request will never exceed a fixed maximum length, it can reserve enough space for that maximum.
+
+![Contiguous max-length reservations can leave unused tails inside allocations and free holes between allocations.](../figures/artwork/ch13/fig-13-contiguous-fragmentation.svg)
 
 That approach matches older static-shape deep learning workloads better than online text generation. In generation, output length is unknown at admission time. Two requests with the same maximum length may finish at very different actual lengths. Different requests may also have different prompt lengths and generation limits.
 
-The vLLM lecture describes previous KV-cache management as preallocating contiguous memory to a request's maximum length, producing internal fragmentation from unknown output length and external fragmentation from non-uniform request maximums. [CITE: llmsys-24-contiguous-preallocation-fragmentation]
+The vLLM lecture describes previous KV cache management as preallocating contiguous memory to a request's maximum length, producing internal fragmentation from unknown output length and external fragmentation from non-uniform request maximums. [CITE: llmsys-24-contiguous-preallocation-fragmentation]
 
 The waste has two forms:
 
@@ -83,11 +87,13 @@ external fragmentation:
 
 For a serving engine, this is not just allocator ugliness. Fragmented KV memory reduces the number of active requests that can fit. Fewer active requests can reduce batching opportunities during decode. Worse batching can reduce throughput or increase queueing delay.
 
-The lecture reports low KV-cache utilization for earlier systems while citing ORCA, but the slide does not carry enough experiment context to use the numeric range as a general book claim. [CITE: llmsys-24-kv-cache-utilization-caution] The safe conclusion is qualitative: contiguous maximum-length reservation is a poor fit for variable-length autoregressive serving.
+The lecture reports low KV cache utilization for earlier systems while citing ORCA, but the slide does not carry enough experiment context to use the numeric range as a general book claim. [CITE: llmsys-24-kv-cache-utilization-caution] The safe conclusion is qualitative: contiguous maximum-length reservation is a poor fit for variable-length autoregressive serving.
 
 ## KV Blocks
 
-PagedAttention changes the allocation unit. Instead of reserving one contiguous region for an entire request, it divides KV cache into fixed-size KV blocks. The lecture defines a KV block as a fixed-size block of memory that stores KV-cache state. [CITE: llmsys-24-kv-block-definition]
+PagedAttention changes the allocation unit. Instead of reserving one contiguous region for an entire request, it divides KV cache into fixed-size KV blocks. The lecture defines a KV block as a fixed-size block of memory that stores KV cache state. [CITE: llmsys-24-kv-block-definition]
+
+![PagedAttention divides a sequence's KV cache into fixed-size logical blocks, with the final block possibly only partly filled.](../figures/artwork/ch13/fig-13-kv-blocks.svg)
 
 Conceptually:
 
@@ -115,6 +121,8 @@ This matches generation better than maximum-length reservation. The allocator do
 
 Once a request is split into logical blocks, those logical blocks do not have to live in adjacent physical GPU-memory blocks.
 
+![A block table maps logical sequence blocks to physical KV blocks, allowing the sequence to be stored non-contiguously.](../figures/artwork/ch13/fig-13-block-table.svg)
+
 PagedAttention introduces a block table. The vLLM lecture shows logical KV blocks mapped to physical KV blocks through that table. [CITE: llmsys-24-block-table-virtualization]
 
 One request might look like this:
@@ -139,7 +147,7 @@ OS virtual memory:
 
 PagedAttention:
   application-level block table
-  specialized KV-cache memory
+  specialized KV cache memory
   attention kernels that understand block indirection
   request-level preemption and recovery
 ```
@@ -149,6 +157,8 @@ The block table is not magic hardware paging. It is a serving-engine data struct
 ## PagedAttention as a Kernel Contract
 
 The allocator change only works if attention can read the new memory layout.
+
+![The PagedAttention kernel follows block-table indirection to read a request's KV blocks from non-contiguous physical memory during attention.](../figures/artwork/ch13/fig-13-pagedattention-kernel.svg)
 
 Standard attention wants the previous keys and values for the sequence. If those keys and values are stored in a contiguous tensor, the kernel can use ordinary contiguous indexing. With PagedAttention, the logical sequence is spread across non-contiguous physical KV blocks. The attention computation therefore needs the block table.
 
@@ -168,11 +178,13 @@ attention behavior:
   compute attention without building a contiguous K/V copy
 ```
 
-This is the systems tradeoff. PagedAttention reduces allocator fragmentation and enables sharing, but it increases runtime complexity. The kernel has to handle indirection. The scheduler and KV-cache manager have to maintain block tables correctly. The engine has to coordinate memory allocation with request admission and decode iterations.
+This is the systems tradeoff. PagedAttention reduces allocator fragmentation and enables sharing, but it increases runtime complexity. The kernel has to handle indirection. The scheduler and KV cache manager have to maintain block tables correctly. The engine has to coordinate memory allocation with request admission and decode iterations.
 
 ## Fragmentation After Paging
 
 With fixed-size blocks, the main remaining internal waste is at the last block of a sequence. The lecture states that internal fragmentation only happens at the last block and that the number of wasted tokens per sequence is less than the block size. [CITE: llmsys-24-pagedattention-fragmentation]
+
+![Under fixed-size KV block allocation, unused space is concentrated in the final partially filled block rather than in a max-length contiguous reservation.](../figures/artwork/ch13/fig-13-fragmentation-boundary.svg)
 
 Under that model:
 
@@ -201,6 +213,8 @@ A draft of this chapter should not pick a universal block size. The right value 
 ## Sharing KV Blocks
 
 Paged memory also makes sharing natural.
+
+![Multiple continuations can share prompt-prefix KV blocks and then branch into separate continuation blocks after their outputs diverge.](../figures/artwork/ch13/fig-13-prefix-sharing.svg)
 
 Suppose a server runs several continuations from the same prompt:
 
@@ -246,6 +260,8 @@ This is the same design pattern as the rest of PagedAttention: logical sequence 
 
 Paged allocation does not make GPU memory infinite. At some point, the physical KV-block pool may be full.
 
+![When memory pressure preempts a request, the serving engine can recover by restoring swapped KV state or by recomputing needed prefix state before resuming.](../figures/artwork/ch13/fig-13-preemption-recovery.svg)
+
 When a new block is needed and no physical block is available, the serving engine has to choose a policy:
 
 ```text
@@ -279,11 +295,13 @@ resume decode
 
 Neither option is free. Swapping consumes host-device bandwidth and creates transfer scheduling work. Recomputation consumes GPU compute and can affect latency. The right policy depends on request length, model cost, interconnect, memory pressure, and scheduling goals.
 
-The important point for this chapter is that KV-cache management becomes part of request scheduling. The scheduler is not only choosing which tokens to compute. It is choosing which requests deserve scarce persistent memory.
+The important point for this chapter is that KV cache management becomes part of request scheduling. The scheduler is not only choosing which tokens to compute. It is choosing which requests deserve scarce persistent memory.
 
 ## vLLM Around PagedAttention
 
 PagedAttention is the central mechanism in this chapter, but vLLM is an inference engine, not just an allocator.
+
+![PagedAttention sits inside a larger vLLM serving engine that includes API handling, scheduling, KV management, workers, and model kernels.](../figures/artwork/ch13/fig-13-vllm-engine-boundary.svg)
 
 The lecture presents vLLM as exposing both an offline Python `LLM` interface and an OpenAI-compatible server interface. [CITE: llmsys-24-vllm-api-surface] That API surface is not the main lesson, but it marks the boundary between user-facing serving and the engine internals.
 
@@ -302,7 +320,7 @@ PagedAttention sits in the fourth category, but it interacts with the other thre
 
 ```text
 CPU overhead:
-  scheduler and KV-cache manager update block tables and batch metadata
+  scheduler and KV cache manager update block tables and batch metadata
 
 GPU kernels:
   attention kernels must read non-contiguous blocks through indirection
@@ -354,7 +372,7 @@ The tradeoff to remember:
 
 ```text
 PagedAttention exchanges simple contiguous KV tensors
-for a paged KV-cache memory system.
+for a paged KV cache memory system.
 
 That exchange can reduce fragmentation and enable sharing,
 but it requires specialized kernels and careful runtime bookkeeping.
@@ -363,6 +381,6 @@ but it requires specialized kernels and careful runtime bookkeeping.
 Owner: Principal Author  
 Purpose: Chapter 13 ready draft after source extraction, brief, technical review, and red-team review  
 Evidence grade: A for course lecture claims and original PagedAttention paper; no benchmark numbers used  
-Assumptions: This draft focuses on single-engine KV-cache memory management and leaves distributed serving/disaggregation to Chapter 14  
-Open questions: Whether to add a KV-cache byte formula, block-size waste derivation, or copy-on-write detail after a narrower source pass  
+Assumptions: This draft focuses on single-engine KV cache memory management and leaves distributed serving/disaggregation to Chapter 14
+Open questions: Whether to add a KV cache byte formula, block-size waste derivation, or copy-on-write detail after a narrower source pass
 Handoff: Production can move to Chapter 14 source extraction

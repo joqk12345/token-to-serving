@@ -42,6 +42,8 @@ This is the first shift in thinking: GPU programming is not mainly about writing
 
 CUDA programs have two sides.
 
+![A minimal CUDA program is split between host orchestration and device execution: the CPU allocates device memory, copies inputs to the GPU, launches a kernel, copies results back, and frees device memory.](../figures/artwork/ch04/fig-04-host-device-lifecycle.svg)
+
 The CPU is the **host**. It runs the ordinary program, prepares data, allocates memory, launches kernels, and coordinates the computation. The GPU is the **device**. It runs kernel code over many threads. [CITE: llmsys-02-cuda-programming-model]
 
 A minimal CUDA workflow looks like this:
@@ -58,11 +60,13 @@ The common CUDA calls in that lifecycle are `cudaMalloc`, `cudaMemcpy`, kernel l
 
 This lifecycle is simple, but it already contains the performance trap. Copying data between CPU memory and GPU memory is not free. If a program repeatedly moves small tensors across the host-device boundary, it may spend more time moving data than computing. [CITE: llmsys-02-cpu-gpu-data-movement]
 
-For LLM systems, this lesson scales up. We care not only about how many floating-point operations a model requires, but also where tensors live and how often they move. A serving system that constantly moves weights, activations, or KV-cache blocks across slow paths will waste hardware even if the math kernels are fast.
+For LLM systems, this lesson scales up. We care not only about how many floating-point operations a model requires, but also where tensors live and how often they move. A serving system that constantly moves weights, activations, or KV cache blocks across slow paths will waste hardware even if the math kernels are fast.
 
 ## Launching Parallel Work
 
 A kernel launch specifies how many GPU threads should run and how those threads are grouped.
+
+![A CUDA kernel launch creates a grid of thread blocks. Each thread computes its identity from block and thread indices, then uses that identity to choose the data element it owns.](../figures/artwork/ch04/fig-04-grid-block-thread.svg)
 
 CUDA organizes work as:
 
@@ -130,6 +134,8 @@ For now, the important point is that tensors are not abstract once they reach th
 
 Threads do not float around independently. GPU hardware groups and schedules them.
 
+![Thread blocks are scheduled onto streaming multiprocessors, and threads within a block execute in warps under CUDA's SIMT model.](../figures/artwork/ch04/fig-04-sm-warp-scheduling.svg)
+
 NVIDIA GPUs are built from streaming multiprocessors, or SMs. Thread blocks are assigned to SMs. Within an SM, threads execute in groups called warps. In CUDA, a warp contains 32 threads. Those threads execute in a single-instruction, multiple-thread style: the warp issues one instruction across its active threads. [CITE: llmsys-02-gpu-architecture; llmsys-02-warp-execution]
 
 This model explains several later performance ideas.
@@ -145,6 +151,8 @@ This chapter does not need every scheduler detail. It needs the durable mental m
 ## Memory Is Part of the Program
 
 A fast GPU program often starts by avoiding unnecessary movement.
+
+![GPU performance depends on where data lives: host memory, interconnects, GPU global memory, caches, shared memory, and registers all impose different movement costs and visibility rules.](../figures/artwork/ch04/fig-04-memory-paths.svg)
 
 The memory hierarchy includes several levels:
 
@@ -173,7 +181,7 @@ That matters because LLM workloads cross boundaries:
 - input data moves from storage and host memory toward the GPU;
 - training gradients may move between GPUs;
 - model-parallel layers may exchange activations;
-- inference systems may move KV-cache blocks or route requests across devices;
+- inference systems may move KV cache blocks or route requests across devices;
 - checkpoints may move large parameter states through storage and network paths.
 
 Chapter 1 framed LLM systems as compute, memory, bandwidth, communication, and scheduling. The GPU programming model gives those words a concrete substrate. There is device memory, host memory, interconnect bandwidth, SM scheduling, warp execution, and kernel launch overhead.

@@ -47,6 +47,8 @@ A framework is therefore not only a convenience library. It is a staging system.
 
 A training step has several kinds of work:
 
+![A framework turns Python model code into device work by tracing or capturing computation, lowering it through intermediate representations, optimizing the program, and dispatching an executable to the accelerator.](../figures/artwork/ch07/fig-07-python-to-device-program.svg)
+
 - forward computation;
 - loss computation;
 - backward computation;
@@ -93,6 +95,8 @@ Those are systems questions, not modeling questions.
 ## Autodiff Is a Program Transformation
 
 Training requires gradients. A framework must compute derivatives of the loss with respect to parameters. For LLMs, doing that by hand is not realistic. The model graph is too large, and the implementation changes constantly.
+
+![Reverse-mode autodiff builds a backward computation from the forward graph, using saved forward values where gradient rules require them.](../figures/artwork/ch07/fig-07-forward-to-backward-graph.svg)
 
 Automatic differentiation solves this by turning the forward computation into a related backward computation. The lecture frames autodiff as building gradient calculation from primitive operations in the computation graph. [CITE: llmsys-05-automatic-differentiation]
 
@@ -225,6 +229,8 @@ but the staged program must obey the tracer's rules
 
 After tracing, the program must move into compiler IR.
 
+![Intermediate representations such as JAXpr, StableHLO, HLO, backend IR, and executable code separate user-level computation from hardware-specific execution.](../figures/artwork/ch07/fig-07-ir-stack.svg)
+
 The lecture describes a path:
 
 ```text
@@ -307,6 +313,8 @@ The difference is where the decision is made. In Chapter 5, a kernel author expl
 
 Consider a simple sequence:
 
+![Compiler optimization can change tensor layout, fusion, and buffer lifetimes, which changes where intermediate values are stored and when memory traffic occurs.](../figures/artwork/ch07/fig-07-xla-memory-planning.svg)
+
 ```text
 y = gelu(x + bias)
 z = dropout(y) + residual
@@ -331,6 +339,8 @@ That should be used carefully. A compiler can fuse some attention patterns, but 
 ## TPU Shows Why the Backend Matters
 
 So far the chapter has treated the compiler target abstractly. TPU makes the target concrete.
+
+![For TPU execution, compiler tiling and layout choices shape matrix work for a systolic matrix unit rather than for arbitrary scalar execution.](../figures/artwork/ch07/fig-07-tpu-systolic-compile-target.svg)
 
 A TPU is designed around dense linear algebra. The lecture describes TPU matrix multiply units using systolic-array-style dataflow: operands move through a grid of compute elements, and the compiler must organize data movement and scheduling so the matrix units stay fed. [CITE: llmsys-12-tpu-systolic-mxu]
 
@@ -425,6 +435,8 @@ The experimental status matters. A book draft should not treat Pallas APIs as st
 
 The Pallas lecture frames the problem as explicit memory hierarchy control. Pallas exposes memory spaces such as HBM and VMEM on TPU, and gives the kernel author tools to orchestrate movement between them. [CITE: llmsys-13-pallas-memory-hierarchy]
 
+![Pallas-style block programs map grid coordinates to slices of HBM tensors, exposing block-level work through BlockSpec and VMEM references.](../figures/artwork/ch07/fig-07-pallas-blockspec-grid.svg)
+
 The core programming shape is:
 
 ```text
@@ -463,6 +475,8 @@ only the tile needed for this program instance should occupy scarce local memory
 ## Pipelining Hides Transfer Latency
 
 Tiling solves capacity and reuse. It does not automatically solve latency.
+
+![A tiled kernel can overlap movement of later tiles with computation on current tiles by staging data through VMEM.](../figures/artwork/ch07/fig-07-pallas-pipeline.svg)
 
 If a kernel waits for every HBM-to-VMEM transfer before doing compute, the compute units may sit idle. Pipelining overlaps data movement with computation: while the current tile is being processed, the next tile is being fetched. The Pallas lecture describes this as overlapping HBM and VMEM transfer with active computation. [CITE: llmsys-13-pallas-pipelining]
 

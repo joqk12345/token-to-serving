@@ -47,6 +47,8 @@ and when can each device do useful work?
 
 In synchronous data parallelism, every worker stores the same parameters `θ`. Each worker sees a different local batch, computes gradients, participates in gradient synchronization, and applies an equivalent local update.
 
+![Data parallelism replicates the model across workers, while model parallelism partitions model computation or state across workers.](../figures/artwork/ch09/fig-09-data-vs-model-parallel.svg)
+
 Model parallelism breaks that symmetry. Device 0 may own early layers, device 1 may own middle layers, and device 2 may own later layers. Or several devices may jointly compute one large matrix multiplication inside a Transformer block.
 
 The difference is visible in what each device stores:
@@ -88,6 +90,8 @@ The memory benefit is direct: no single stage needs to store every model paramet
 
 The first attempt at pipeline parallelism is often too literal:
 
+![A layer-wise pipeline can leave devices idle while stages wait for inputs or gradients, creating pipeline bubbles.](../figures/artwork/ch09/fig-09-naive-pipeline-bubble.svg)
+
 ```text
 run the whole batch through stage 0
 then stage 1
@@ -104,6 +108,8 @@ This is the same systems pattern that appeared in Chapter 8. DDP improves when c
 ## Micro-Batching Fills the Pipeline
 
 GPipe-style pipeline parallelism divides a mini-batch into smaller micro-batches. [CITE: llmsys-16-gpipe-microbatching] The GPipe paper describes partitioning a network across accelerators and using batch-splitting pipeline parallelism to improve utilization. [CITE: huang-2018-gpipe]
+
+![GPipe-style micro-batching lets different micro-batches occupy different pipeline stages, reducing idle gaps after warmup.](../figures/artwork/ch09/fig-09-gpipe-microbatches.svg)
 
 The scheduling idea is easier to see as a timeline:
 
@@ -150,6 +156,8 @@ The tradeoff is not abstract. It changes the pipeline schedule. Recompute work c
 ## 1F1B Starts Backward Earlier
 
 One way to reduce in-flight activation pressure is to start backward as soon as useful backward work is available. The lecture describes 1F1B as a schedule that starts backward as soon as possible, reducing activation memory relative to schedules that run many forwards before backward. [CITE: llmsys-16-one-f-one-b]
+
+![One-forward-one-backward scheduling alternates forward and backward work after warmup, changing utilization and activation lifetime relative to all-forward-then-backward scheduling.](../figures/artwork/ch09/fig-09-1f1b-vs-gpipe.svg)
 
 The name means "one forward, one backward" in the steady state. A simplified view is:
 
@@ -243,6 +251,8 @@ the matrix split determines the collective
 
 A Transformer feed-forward network has two linear projections with a nonlinearity between them. In simplified form:
 
+![Tensor parallelism splits FFN matrix operations across devices and uses collective communication to assemble the logical layer result.](../figures/artwork/ch09/fig-09-tensor-parallel-ffn.svg)
+
 ```text
 H = activation(X A)
 Z = H B
@@ -274,6 +284,8 @@ The mechanism matters because it avoids materializing the full expanded intermed
 ## Attention Head Parallelism
 
 Self-attention has a natural partition boundary: heads. Multi-head attention computes several attention heads and then combines their outputs.
+
+![Attention heads can be partitioned across devices so each worker computes a subset of heads before outputs are combined.](../figures/artwork/ch09/fig-09-tensor-parallel-attention-heads.svg)
 
 The lecture describes splitting attention weights over columns or heads and notes that the head-local computation does not require all-reduce. [CITE: llmsys-16-tensor-parallel-attention]
 
@@ -311,6 +323,8 @@ Embedding tables, output logits, and loss computation interact with vocabulary p
 ## Combining Tensor, Pipeline, and Data Parallelism
 
 Large training runs often combine several parallelism axes:
+
+![Large training jobs can compose data, pipeline, and tensor parallel groups, with each axis introducing different communication or scheduling constraints.](../figures/artwork/ch09/fig-09-3d-parallelism.svg)
 
 ```text
 tensor parallelism: split operations inside a layer

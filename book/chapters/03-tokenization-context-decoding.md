@@ -25,6 +25,8 @@ This chapter is about the boundary around the Transformer block.
 
 A tokenizer splits text into units that can index an embedding table. The token IDs are the model's discrete interface. [CITE: llmsys-08-tokenization-tradeoffs]
 
+![Word, character, and subword tokenization split the same text differently, trading off vocabulary size, sequence length, and handling of rare or unseen strings.](../figures/artwork/ch03/fig-03-tokenizer-comparison.svg)
+
 That sounds simple until the word "unit" is taken seriously.
 
 Consider:
@@ -44,6 +46,8 @@ Subword tokenization is the compromise most modern LLM readers encounter. Freque
 ## BPE as a Compression Habit
 
 Byte Pair Encoding, or BPE, starts from small units and repeatedly merges frequent adjacent pairs into new tokens until the vocabulary reaches a target size. The Sennrich paper is the primary anchor for this NMT use of subword units. [CITE: llmsys-08-bpe-algorithm; sennrich-2016-bpe-rare-words]
+
+![Byte-pair encoding repeatedly merges frequent adjacent symbols, growing a vocabulary of reusable subword units.](../figures/artwork/ch03/fig-03-bpe-loop.svg)
 
 A small toy example is enough:
 
@@ -71,7 +75,7 @@ Neither side is free.
 
 Tokenizer design affects at least four costs.
 
-First, it affects sequence length. If a language, domain, or notation is over-tokenized, a short human string becomes a long model sequence. That increases attention work, KV-cache size, and latency.
+First, it affects sequence length. If a language, domain, or notation is over-tokenized, a short human string becomes a long model sequence. That increases attention work, KV cache size, and latency.
 
 Second, it affects vocabulary size. A larger vocabulary means larger embedding and output projection structures. It may shorten sequences, but it also increases the dimension of the final token distribution.
 
@@ -91,13 +95,15 @@ A model that accepts `N` tokens does not accept `N` words. It accepts `N` tokeni
 
 That budget matters during both training and inference.
 
-During training, sequence length affects activation memory and attention computation. During inference, prompt length affects prefill work and KV-cache size. During decoding, every generated token extends the context and adds new cache state.
+During training, sequence length affects activation memory and attention computation. During inference, prompt length affects prefill work and KV cache size. During decoding, every generated token extends the context and adds new cache state.
 
 This is why tokenization belongs in a systems book. A tokenizer choice can show up later as a memory problem, a throughput problem, or a fairness problem across languages.
 
 ## Decoding Turns Probabilities Into Text
 
 The model produces logits for the next token. Decoding decides what to do with them.
+
+![Greedy decoding, sampling, and beam search use the same next-token distribution differently: selecting the highest-probability token, drawing stochastically, or tracking multiple partial sequences.](../figures/artwork/ch03/fig-03-decode-methods.svg)
 
 Sequence decoding asks for:
 
@@ -133,6 +139,8 @@ That is why later serving chapters will distinguish prefill from decode. Prefill
 
 Speculative decoding attacks the serial bottleneck by adding another model.
 
+![Speculative decoding uses a draft model to propose tokens and a target model to validate them, changing the shape of autoregressive work while preserving target-model validation.](../figures/artwork/ch03/fig-03-speculative-pipeline.svg)
+
 The basic idea is to use a smaller draft model to propose several tokens, then use the larger target model to validate them. The primary speculative decoding paper keeps the target distribution exact. [CITE: llmsys-09-speculative-decoding; leviathan-2022-speculative-decoding]
 
 The intuition is:
@@ -151,6 +159,8 @@ For this chapter, speculative decoding is mainly a preview. The deeper serving q
 ## Advanced Sidebar: EAGLE as a Hint of the Direction
 
 EAGLE predicts final-layer features rather than directly predicting next tokens with a separate small language model. It uses the original model's embedding and language-model head, a small Transformer layer, and tree attention for efficient implementation. [CITE: llmsys-09-speculative-decoding; li-2024-eagle]
+
+![EAGLE extends speculative decoding by predicting features that help propose candidate continuations before target-model validation.](../figures/artwork/ch03/fig-03-eagle-feature-loop.svg)
 
 The details are advanced enough to defer. The important lesson is that decoding acceleration is not only about choosing a different search algorithm. It can change the internal representation being predicted, the attention mask used for validation, and the shape of the work presented to the hardware.
 

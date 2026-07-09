@@ -25,6 +25,8 @@ This chapter turns the GPU programming model into performance reasoning.
 
 A GPU can advertise enormous arithmetic throughput and still run a kernel slowly. The reason is simple: arithmetic units need data. If data arrives too slowly, the compute units wait.
 
+![A kernel with little arithmetic per byte moved can be memory-bound: the arithmetic units may wait for data even when peak compute throughput is high.](../figures/artwork/ch05/fig-05-memory-bound-intuition.svg)
+
 One useful question is:
 
 ```text
@@ -46,6 +48,8 @@ Transformer systems encounter the same pattern in less obvious places. Elementwi
 ## Naive Matrix Multiplication Wastes Reuse
 
 Matrix multiplication has more arithmetic, but a naive implementation can still waste memory bandwidth.
+
+![Naive matrix multiplication repeatedly reads operands from global memory, while a tiled kernel loads smaller blocks into shared memory so threads in a block can reuse them.](../figures/artwork/ch05/fig-05-naive-vs-tiled-matmul.svg)
 
 A simple kernel assigns one output element to one thread:
 
@@ -89,6 +93,8 @@ This is why Chapter 4's memory hierarchy matters. If all memory looked the same,
 
 Tiling is about reuse. Coalescing is about access shape.
 
+![Matrix transpose exposes the difference between correct indexing and efficient memory access: coalesced warp accesses align neighboring threads with neighboring addresses, while strided accesses can require more transactions.](../figures/artwork/ch05/fig-05-coalescing-transpose.svg)
+
 When neighboring threads in a warp access neighboring memory addresses, the hardware can combine those accesses efficiently. When those same threads access scattered or strided addresses, the hardware may need more memory transactions. [CITE: llmsys-04-coalesced-access]
 
 Matrix transpose is the clean example. Reading a row-major matrix by rows gives adjacent threads adjacent addresses. Writing the transposed output can turn that pattern into strided writes. The kernel may be correct, but its memory behavior can be poor.
@@ -114,6 +120,8 @@ But Transformer blocks are not only GEMM. They also contain elementwise operatio
 ## Transformer Blocks Are Mixed Workloads
 
 A Transformer block contains GEMM-heavy work:
+
+![A Transformer block is a mixed workload: GEMM-heavy projections sit beside elementwise operations, reductions such as softmax and LayerNorm, and memory-management choices.](../figures/artwork/ch05/fig-05-transformer-operator-map.svg)
 
 - projections to `Q`, `K`, and `V`;
 - attention output projection;
@@ -141,6 +149,8 @@ This distinction prevents a common misunderstanding. Attention and FFN layers ma
 ## Kernel Fusion Removes Unnecessary Boundaries
 
 Kernel fusion combines multiple simple operations into one kernel.
+
+![Kernel fusion removes unnecessary intermediate tensor boundaries: instead of writing `C` to global memory and reading it back, a fused kernel can compute the final result in one pass.](../figures/artwork/ch05/fig-05-kernel-fusion.svg)
 
 Suppose a program computes:
 
@@ -211,7 +221,7 @@ Would recomputing it be cheaper than storing it?
 
 Transformer attention backward is a dense example because it creates many intermediate gradients and temporary tensors. Serving has a different version of the same issue: KV cache persists, while many intermediate activations can be discarded after a decode step.
 
-This pattern will reappear in ZeRO, activation checkpointing, KV-cache management, and serving systems. The details change, but the question remains the same: which tensors must exist at the same time?
+This pattern will reappear in ZeRO, activation checkpointing, KV cache management, and serving systems. The details change, but the question remains the same: which tensors must exist at the same time?
 
 ## The Chapter 5 Pattern
 

@@ -19,19 +19,21 @@ The book began with a simple mathematical object:
 predict the next token
 ```
 
-A language model assigns a probability to the next token conditioned on the prompt and previous generated tokens. [CITE: llmsys-01-next-token-probability] Pretraining commonly turns that into cross-entropy loss for next-token prediction over raw text. [CITE: llmsys-01-training-objective]
+A language model assigns a probability to the next token conditioned on the prompt and previous generated tokens. \[CITE: llmsys-01-next-token-probability] Pretraining commonly turns that into cross-entropy loss for next-token prediction over raw text. \[CITE: llmsys-01-training-objective]
 
 That objective is compact. The system that makes it useful is not.
 
 To train and serve modern LLMs, the system has to decide how the model is represented, how tensors move, how kernels use hardware, how workers communicate, how memory is partitioned, how requests are scheduled, and how latency or training targets are measured.
 
-The introductory lecture states the central systems claim: making computation fast is not enough. LLM systems require attention to compute, memory, data movement, communication, abstraction design, distributed systems, frameworks, operators, kernels, and compression. [CITE: llmsys-01-system-challenges]
+The introductory lecture states the central systems claim: making computation fast is not enough. LLM systems require attention to compute, memory, data movement, communication, abstraction design, distributed systems, frameworks, operators, kernels, and compression. \[CITE: llmsys-01-system-challenges]
 
 This final chapter is a design method for using the rest of the book.
 
 ## The Simple Objective Becomes a Stack
 
-Decoder-only autoregressive models are presented in the course as the most popular architecture choice for modern LLMs. [CITE: llmsys-01-decoder-only]
+Decoder-only autoregressive models are presented in the course as the most popular architecture choice for modern LLMs. \[CITE: llmsys-01-decoder-only]
+
+![The book stack connects next-token objectives, tokenization, Transformer computation, kernels, compilers, distributed training, compression, inference scheduling, KV cache, and serving infrastructure.](../figures/artwork/ch15/fig-15-stack-recap.svg)
 
 That architecture choice has system consequences:
 
@@ -74,7 +76,9 @@ The correct mental model is not a stack of independent layers. It is a loop.
 
 ## Co-Design Means Joint Constraints
 
-The introduction lecture states that LLMs need model-algorithm-system co-design across model architecture, algorithms, software optimization, and hardware acceleration. [CITE: llmsys-01-codesign]
+The introduction lecture states that LLMs need model-algorithm-system co-design across model architecture, algorithms, software optimization, and hardware acceleration. \[CITE: llmsys-01-codesign]
+
+![LLM system design links model architecture, algorithms, software/runtime choices, and hardware capabilities in a feedback loop.](../figures/artwork/ch15/fig-15-codesign-loop.svg)
 
 Co-design means the design variable may live at any layer:
 
@@ -101,7 +105,7 @@ faster attention kernel:
   may expose communication or MLP as the new bottleneck
 
 larger serving batch:
-  may improve compute utilization but increase KV-cache pressure
+  may improve compute utilization but increase KV cache pressure
 
 quantized weights:
   may reduce memory bandwidth but require compatible kernels
@@ -120,6 +124,8 @@ and where will it move if we apply this optimization?
 ## Bottleneck Ownership
 
 When an LLM system fails to meet a target, first name the bottleneck. Do not begin by naming a tool.
+
+![Systems diagnosis starts by identifying whether the active bottleneck is compute, memory, communication, scheduling, reliability, or abstraction, then choosing an intervention that can affect that bottleneck.](../figures/artwork/ch15/fig-15-bottleneck-routing.svg)
 
 Use a small checklist:
 
@@ -163,9 +169,9 @@ The word "safe" matters. A technique that improves one benchmark may be a bad in
 
 Long context looks like a model feature. It quickly becomes a system problem.
 
-Longer contexts increase attention work, memory movement, and KV-cache state. FlashAttention-style attention acceleration is an algorithm/hardware co-design response to attention's memory behavior; it changes how attention is computed to reduce memory traffic while preserving the result. [CITE: llmsys-21-modern-hardware-attention]
+Longer contexts increase attention work, memory movement, and KV cache state. FlashAttention-style attention acceleration is an algorithm/hardware co-design response to attention's memory behavior; it changes how attention is computed to reduce memory traffic while preserving the result. \[CITE: llmsys-21-modern-hardware-attention]
 
-At serving time, the long-context problem changes shape. The model no longer only needs efficient prefill attention. It must keep KV state for active requests. The vLLM lecture frames KV-cache management as central to high-throughput serving. [CITE: llmsys-24-kv-cache-memory-management]
+At serving time, the long-context problem changes shape. The model no longer only needs efficient prefill attention. It must keep KV state for active requests. The vLLM lecture frames KV cache management as central to high-throughput serving. \[CITE: llmsys-24-kv-cache-memory-management]
 
 PagedAttention then changes the memory layout:
 
@@ -179,16 +185,16 @@ use:
   attention kernels that read through indirection
 ```
 
-PagedAttention is presented as application-level paging and virtualization for attention KV cache. [CITE: llmsys-24-pagedattention-definition] Its kernel reads non-contiguous KV blocks through the block table rather than materializing gathered K/V tensors. [CITE: llmsys-24-pagedattention-kernel]
+PagedAttention is presented as application-level paging and virtualization for attention KV cache. \[CITE: llmsys-24-pagedattention-definition] Its kernel reads non-contiguous KV blocks through the block table rather than materializing gathered K/V tensors. \[CITE: llmsys-24-pagedattention-kernel]
 
-At distributed serving scale, long context becomes a routing and storage problem. KV-aware routing considers whether useful cache state already exists on a worker. [CITE: llmsys-26-kv-aware-routing] Disaggregated serving may need to transfer KV cache from prefill to decode workers. [CITE: llmsys-29-disaggregation-challenges]
+At distributed serving scale, long context becomes a routing and storage problem. KV-aware routing considers whether useful cache state already exists on a worker. \[CITE: llmsys-26-kv-aware-routing] Disaggregated serving may need to transfer KV cache from prefill to decode workers. \[CITE: llmsys-29-disaggregation-challenges]
 
 One user-visible feature has touched:
 
 ```text
 attention algorithm
 GPU kernel memory traffic
-KV-cache allocator
+KV cache allocator
 serving scheduler
 distributed routing
 memory hierarchy
@@ -200,11 +206,11 @@ That is co-design.
 
 Large training begins with a memory and communication ledger.
 
-Data parallelism replicates the model and averages gradients across workers. DDP uses gradient synchronization and can overlap communication with backward computation. [CITE: llmsys-15-ddp-overlap]
+Data parallelism replicates the model and averages gradients across workers. DDP uses gradient synchronization and can overlap communication with backward computation. \[CITE: llmsys-15-ddp-overlap]
 
-When the model no longer fits cleanly, model parallelism enters. Tensor parallelism partitions matrix operations; pipeline parallelism partitions layers and introduces pipeline scheduling costs. [CITE: llmsys-16-tensor-parallel-matmul] [CITE: llmsys-16-pipeline-costs]
+When the model no longer fits cleanly, model parallelism enters. Tensor parallelism partitions matrix operations; pipeline parallelism partitions layers and introduces pipeline scheduling costs. \[CITE: llmsys-16-tensor-parallel-matmul] \[CITE: llmsys-16-pipeline-costs]
 
-When optimizer state dominates memory, ZeRO partitions optimizer states, gradients, and parameters across data-parallel ranks. [CITE: llmsys-18-zero-key-idea]
+When optimizer state dominates memory, ZeRO partitions optimizer states, gradients, and parameters across data-parallel ranks. \[CITE: llmsys-18-zero-key-idea]
 
 The naive question is:
 
@@ -250,11 +256,11 @@ The system is the interaction.
 
 Compression and adaptation show the same principle from another angle.
 
-Quantization reduces tensor precision and can reduce memory pressure, but it introduces numerical error and depends on kernel/runtime support. [CITE: llmsys-19-quantization-purpose] Direct quantization can lose information through rounding, clipping, and range mismatch. [CITE: llmsys-19-direct-quantization-errors]
+Quantization reduces tensor precision and can reduce memory pressure, but it introduces numerical error and depends on kernel/runtime support. \[CITE: llmsys-19-quantization-purpose] Direct quantization can lose information through rounding, clipping, and range mismatch. \[CITE: llmsys-19-direct-quantization-errors]
 
-LoRA changes what is trainable. It freezes pretrained weights and trains a low-rank update. [CITE: llmsys-23-lora-lowrank-update] The memory saving comes from reducing trainable state, gradients, and optimizer state for the adaptation path, not from making the base model disappear. [CITE: llmsys-23-lora-training-state]
+LoRA changes what is trainable. It freezes pretrained weights and trains a low-rank update. \[CITE: llmsys-23-lora-lowrank-update] The memory saving comes from reducing trainable state, gradients, and optimizer state for the adaptation path, not from making the base model disappear. \[CITE: llmsys-23-lora-training-state]
 
-QLoRA combines a quantized base model with LoRA-style adaptation. [CITE: llmsys-23-qlora-quantized-lora]
+QLoRA combines a quantized base model with LoRA-style adaptation. \[CITE: llmsys-23-qlora-quantized-lora]
 
 A product team might state the problem as:
 
@@ -290,13 +296,13 @@ The intervention changes the system contract. Quantization is not just smaller f
 
 Serving also shows why the target metric matters.
 
-Raw throughput is not enough if many requests miss latency SLOs. The disaggregation lecture defines goodput as completed requests within SLO criteria. [CITE: llmsys-29-goodput-definition]
+Raw throughput is not enough if many requests miss latency SLOs. The disaggregation lecture defines goodput as completed requests within SLO criteria. \[CITE: llmsys-29-goodput-definition]
 
-Prefill and decode stress different resources: prefill is compute-bound, while decode is memory-bound and benefits from many batched requests. [CITE: llmsys-29-prefill-decode-characteristics]
+Prefill and decode stress different resources: prefill is compute-bound, while decode is memory-bound and benefits from many batched requests. \[CITE: llmsys-29-prefill-decode-characteristics]
 
-A colocated server may have high utilization and still produce poor user experience under some workloads. Prefill/decode disaggregation separates the phases so prefill instances can optimize TTFT and decode instances can optimize TPOT. [CITE: llmsys-29-disaggregation-opportunity]
+A colocated server may have high utilization and still produce poor user experience under some workloads. Prefill/decode disaggregation separates the phases so prefill instances can optimize TTFT and decode instances can optimize TPOT. \[CITE: llmsys-29-disaggregation-opportunity]
 
-But the intervention creates a new cost: KV cache has to move or become accessible across the phase boundary. The disaggregation lecture names KV-cache transmission overhead as a challenge. [CITE: llmsys-29-disaggregation-challenges]
+But the intervention creates a new cost: KV cache has to move or become accessible across the phase boundary. The disaggregation lecture names KV cache transmission overhead as a challenge. \[CITE: llmsys-29-disaggregation-challenges]
 
 The co-design loop is visible:
 
@@ -318,7 +324,9 @@ Serving architecture is therefore not merely horizontal scaling. KV cache makes 
 
 ## Scaling Up and Scaling Down
 
-The introduction lecture frames the system challenge as computing training and inference for larger LLMs on bigger datasets with fewer resources, including GPU, memory, and power. [CITE: llmsys-01-system-challenges]
+The introduction lecture frames the system challenge as computing training and inference for larger LLMs on bigger datasets with fewer resources, including GPU, memory, and power. \[CITE: llmsys-01-system-challenges]
+
+![An optimization can relieve one bottleneck and expose another, shifting pressure from compute to memory, communication, scheduling, or another system resource.](../figures/artwork/ch15/fig-15-optimization-moves-bottleneck.svg)
 
 That sentence contains both directions:
 

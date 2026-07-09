@@ -42,6 +42,8 @@ The disaggregation lecture defines goodput as completed requests within SLO crit
 
 Training usually runs a coordinated job. It has a known model, a known parallelism plan, long-running workers, and a steady stream of batches.
 
+![Throughput counts completed work, while goodput counts work that completes within the serving objective being evaluated.](../figures/artwork/ch14/fig-14-throughput-vs-goodput.svg)
+
 Serving is less regular. The Dynamo lecture contrasts training with inference by describing inference as many smaller online jobs with rapid scale-up and scale-down requirements. [CITE: llmsys-26-inference-vs-training]
 
 At scale, the serving system must handle:
@@ -55,7 +57,7 @@ heterogeneous hardware
 fault tolerance
 multiple models
 cost and power constraints
-KV-cache hit rate
+KV cache hit rate
 ```
 
 The Dynamo lecture lists these as part of the challenge of serving AI inference at scale. [CITE: llmsys-26-scale-serving-challenges]
@@ -65,6 +67,8 @@ This is why the serving scheduler becomes a distributed systems component. It is
 ## TTFT, TPOT, and Goodput
 
 A streamed LLM response has at least two latency surfaces.
+
+![Time to first token measures the delay before streaming begins, while time per output token measures the pace of later generated tokens.](../figures/artwork/ch14/fig-14-ttft-tpot.svg)
 
 ```text
 TTFT:
@@ -115,6 +119,8 @@ These questions are outside a single batch loop. They require serving architectu
 
 Prefill and decode are both Transformer inference, but they stress the system differently.
 
+![Colocating prefill and decode on the same resources can create interference because the two phases place different pressure on compute, memory, and scheduling.](../figures/artwork/ch14/fig-14-prefill-decode-interference.svg)
+
 The disaggregation lecture characterizes prefill as compute-bound and decode as memory-bound, with decode needing many batched requests to saturate compute. [CITE: llmsys-29-prefill-decode-characteristics]
 
 The reason is the shape of work:
@@ -143,6 +149,8 @@ Colocation is not always wrong. It is simpler and avoids explicit KV transfer be
 
 Prefill/decode disaggregation separates the two phases into different worker pools:
 
+![Prefill-decode disaggregation routes prompt processing to prefill workers, transfers KV state, and streams generation from decode workers.](../figures/artwork/ch14/fig-14-pd-disaggregation.svg)
+
 ```text
 request arrives
   -> prefill worker processes prompt
@@ -169,7 +177,7 @@ decode pool:
 
 The cost is that KV cache crosses a boundary. A decode worker cannot continue generation unless it can access the keys and values created during prefill.
 
-The disaggregation lecture names this directly: disaggregation introduces KV-cache transmission overhead and makes per-GPU goodput hard to optimize because workload pattern, SLOs, parallelism, resource allocation, and network bandwidth all matter. [CITE: llmsys-29-disaggregation-challenges]
+The disaggregation lecture names this directly: disaggregation introduces KV cache transmission overhead and makes per-GPU goodput hard to optimize because workload pattern, SLOs, parallelism, resource allocation, and network bandwidth all matter. [CITE: llmsys-29-disaggregation-challenges]
 
 The design question is therefore not "disaggregate or not" in the abstract. It is:
 
@@ -181,6 +189,8 @@ the placement and KV-transfer cost for this workload?
 ## Placement Is Part of the Algorithm
 
 Once prefill and decode are separate, the system has to decide how many of each to run and where to put them.
+
+![Serving placement chooses how model instances, parallelism groups, and prefill/decode roles map onto physical nodes and devices.](../figures/artwork/ch14/fig-14-placement-problem.svg)
 
 DistServe-style placement is framed as choosing:
 
@@ -200,6 +210,8 @@ Placement is not a one-time math exercise. Traffic changes. Prompt lengths chang
 ## KV-Aware Routing
 
 Routing cannot look only at load.
+
+![KV-aware routing considers cache locality as well as load when assigning incoming requests to workers.](../figures/artwork/ch14/fig-14-kv-aware-routing.svg)
 
 Suppose two workers are available:
 
@@ -236,9 +248,11 @@ This is the distributed version of the Chapter 13 lesson. KV cache is not just m
 
 Chapter 13 treated KV cache as a paged memory object inside an engine. Chapter 14 treats KV cache as data that may live outside one inference process.
 
+![An external KV manager can let inference engines look up, share, offload, or reuse KV state outside a single engine process.](../figures/artwork/ch14/fig-14-external-kv-manager.svg)
+
 The LMCache lecture says KV cache can be treated as reusable serving data rather than merely internal tensors. [CITE: llmsys-27-kv-cache-ai-native-data] It also states that KV cache avoids repeated computation by storing reusable attention state. [CITE: llmsys-27-kv-cache-reuse]
 
-LMCache is presented as separating KV-cache management from inference engines by running as a separate KV-cache management service. [CITE: llmsys-27-lmcache-separated-service]
+LMCache is presented as separating KV cache management from inference engines by running as a separate KV cache management service. [CITE: llmsys-27-lmcache-separated-service]
 
 The architectural move is:
 
@@ -260,13 +274,15 @@ compress cache for storage or transfer
 integrate with different storage backends
 ```
 
-The LMCache lecture presents hooks and storage plugins for get/put KV-cache operations. [CITE: llmsys-27-storage-plugin-interface] It also illustrates a multi-process CPU pool and remote KV pool to reduce extra CPU-side copies when sharing cache across GPU workers. [CITE: llmsys-27-zero-copy-cpu-sharing]
+The LMCache lecture presents hooks and storage plugins for get/put KV cache operations. [CITE: llmsys-27-storage-plugin-interface] It also illustrates a multi-process CPU pool and remote KV pool to reduce extra CPU-side copies when sharing cache across GPU workers. [CITE: llmsys-27-zero-copy-cpu-sharing]
 
 The exact APIs are implementation details and can change. The durable concept is the boundary: KV cache is becoming a managed object with a storage and transfer interface.
 
 ## Memory Tiers and Transfer
 
 GPU HBM is fast and scarce. KV cache may be too large or too reusable to keep only in HBM.
+
+![KV cache management can span GPU memory, CPU DRAM, SSD, and remote storage tiers when active state exceeds the fastest local memory.](../figures/artwork/ch14/fig-14-kv-memory-hierarchy.svg)
 
 The Dynamo lecture presents KV offload across HBM, host memory, local SSD, and network storage. [CITE: llmsys-26-memory-tiers-kv-offload]
 
@@ -286,9 +302,9 @@ network storage / remote pool:
   shared, potentially large, transfer-sensitive
 ```
 
-Mooncake makes the same design point from a KV-cache-centric architecture. It presents distributed multi-layer KV-cache pools/storage and cache capacity beyond one machine. [CITE: llmsys-28-distributed-kv-pool]
+Mooncake makes the same design point from a KV cache-centric architecture. It presents distributed multi-layer KV cache pools/storage and cache capacity beyond one machine. [CITE: llmsys-28-distributed-kv-pool]
 
-But moving cache through the hierarchy has a cost. Mooncake's lecture states that KV-cache caching creates storage challenges because cache size and transfer bandwidth matter. [CITE: llmsys-28-kvcache-storage-challenges]
+But moving cache through the hierarchy has a cost. Mooncake's lecture states that KV cache caching creates storage challenges because cache size and transfer bandwidth matter. [CITE: llmsys-28-kvcache-storage-challenges]
 
 This is the core tradeoff:
 
@@ -308,6 +324,8 @@ The serving system has to decide which KV state is hot enough to keep near the G
 
 Once KV cache moves across workers, memory tiers, and nodes, the transfer mechanism becomes part of serving performance.
 
+![Disaggregated serving relies on a transfer substrate to move KV blocks between GPU memory, host memory, remote nodes, and storage services.](../figures/artwork/ch14/fig-14-transfer-substrate.svg)
+
 The Dynamo lecture presents NIXL as a cross-node and cross-memory transfer layer for buffer lists, with northbound and southbound APIs. [CITE: llmsys-26-nixl-transfer-layer]
 
 Mooncake Store is presented as integrating inference engines with local memory, remote memory, SSD, and third-party storage through object put/get and batch transfer abstractions. [CITE: llmsys-28-mooncake-store-integration]
@@ -326,7 +344,7 @@ A transfer layer has to coordinate memory registration, remote access, batching,
 
 Dynamo is presented as a modular distributed inference stack with scheduling, disaggregated serving, memory management, and data transfer components. [CITE: llmsys-26-dynamo-modular-stack]
 
-Mooncake is presented as a KV-cache-centric disaggregated architecture with cache-aware prefill scheduling, KV-cache pool, KV-cache balancing, and decode scheduling. [CITE: llmsys-28-mooncake-kvcache-centric]
+Mooncake is presented as a KV cache-centric disaggregated architecture with cache-aware prefill scheduling, KV cache pool, KV cache balancing, and decode scheduling. [CITE: llmsys-28-mooncake-kvcache-centric]
 
 Mooncake's lecture also frames prefill/decode disaggregation as a way to avoid interference in mixed batches and decouple resources and parallelism. [CITE: llmsys-28-pd-disaggregation-interference]
 
@@ -335,7 +353,7 @@ The names are less important than the pattern:
 ```text
 request router
 prefill scheduler and workers
-KV-cache manager / store
+KV cache manager / store
 transfer substrate
 decode scheduler and workers
 SLO-aware planner / controller
@@ -349,7 +367,7 @@ Once KV cache is external data, more transformations become possible.
 
 The LMCache lecture presents CacheBlend-style selective prefill: reuse stored KV cache while recomputing selected tokens to recover interactions that direct cache concatenation would miss. [CITE: llmsys-27-cacheblend-selective-prefill]
 
-It also presents KV-cache compression as a way to store more cache and reduce transfer volume. [CITE: llmsys-27-kv-cache-compression]
+It also presents KV cache compression as a way to store more cache and reduce transfer volume. [CITE: llmsys-27-kv-cache-compression]
 
 These techniques are optional for the first-pass chapter, but they show the direction of travel:
 

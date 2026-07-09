@@ -31,6 +31,8 @@ That is why FlashAttention is a systems case study, not only an attention trick.
 
 For one attention head, let:
 
+![Standard attention commonly materializes the score matrix `S = QK^T` and probability matrix `P = softmax(S)` as `N x N` intermediates in HBM before computing `O = PV`.](../figures/artwork/ch06/fig-06-standard-attention-hbm.svg)
+
 ```text
 Q: N x d
 K: N x d
@@ -71,6 +73,8 @@ That statement is stronger than "use a faster kernel." It says the algorithm sho
 
 FlashAttention splits the inputs into blocks. Blocks of `Q`, `K`, and `V` are loaded from HBM into SRAM. The kernel computes attention contributions for those blocks, updates the output, and proceeds to the next block. [CITE: dao-2022-flashattention-tiling]
 
+![FlashAttention computes exact dense attention block by block, moving Q/K/V tiles through on-chip SRAM and avoiding materialization of the full `N x N` attention matrix in HBM.](../figures/artwork/ch06/fig-06-flashattention-tiling.svg)
+
 The rough shape is:
 
 ```text
@@ -90,6 +94,8 @@ This is the same tiling idea from matrix multiplication, but the softmax makes i
 ## Online Softmax Makes Blocks Exact
 
 The challenge is the denominator of softmax.
+
+![Online softmax keeps a running maximum and normalization sum so each new score block can be rescaled into the same row-wise denominator as the previous blocks.](../figures/artwork/ch06/fig-06-online-softmax.svg)
 
 For one row of scores, softmax needs a normalization term over all columns. If the kernel sees only one block of columns at a time, a local softmax over that block is not enough. It would use the wrong denominator.
 
@@ -145,6 +151,8 @@ The formulas are compact, but the systems meaning is the important part: online 
 ## Backward Uses Recomputation
 
 Training needs gradients. A naive backward pass would like to reuse the attention probabilities from forward. Standard implementations may therefore store large `N x N` intermediates.
+
+![FlashAttention trades storage for recomputation in backward: instead of storing the full attention-probability matrix, it stores smaller normalization statistics and recomputes attention blocks when gradients are needed.](../figures/artwork/ch06/fig-06-forward-backward-memory.svg)
 
 FlashAttention chooses a different tradeoff. It stores the output and softmax normalization statistics from the forward pass, then recomputes attention blocks during backward from `Q`, `K`, and `V` as needed. [CITE: dao-2022-backward-recomputation]
 
@@ -207,6 +215,8 @@ This is why high-level tensor code can be too coarse for some LLM systems proble
 ## Modern Hardware Keeps Moving
 
 Later FlashAttention work continues the same pattern on newer GPUs. FlashAttention-2 improves work partitioning and parallelism. FlashAttention-3 targets Hopper-era asynchrony and low precision. FlashAttention-4 targets Blackwell-era asymmetric hardware scaling. [CITE: dao-2023-flashattention-2; shah-2024-flashattention-3; zadouri-2026-flashattention-4]
+
+![Later FlashAttention versions continue the same co-design pattern: FA2 improves work partitioning, FA3 targets Hopper asynchrony and low precision, and FA4 responds to Blackwell-era asymmetric hardware scaling.](../figures/artwork/ch06/fig-06-modern-hardware-sidebar.svg)
 
 Those details are not the main thread of this chapter. They should stay as sidebar direction unless the chapter expands into a version-by-version treatment.
 

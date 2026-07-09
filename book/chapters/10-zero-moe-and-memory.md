@@ -46,6 +46,8 @@ Both are systems techniques. Neither makes memory pressure disappear. ZeRO trade
 
 Data parallelism is attractive because every worker runs a normal model program on a local batch shard. The price is replication. Chapter 8 focused on gradient synchronization. Now look at what each worker stores.
 
+![A DDP worker stores model parameters, gradients, optimizer state, activations, and temporary buffers, so replicated training memory includes more than weights.](../figures/artwork/ch10/fig-10-ddp-memory-ledger.svg)
+
 The ZeRO lecture describes mixed-precision DDP memory as including FP16 parameters, FP16 gradients, FP32 optimizer-related states, activations, temporary buffers, and fragmentation. [CITE: llmsys-18-ddp-memory-accounting]
 
 For Adam-style training under the lecture's mixed-precision framing, the important categories are:
@@ -79,6 +81,8 @@ Model parallelism can reduce how much of the model computation sits on one devic
 ## ZeRO: Remove Redundant State
 
 ZeRO stands for Zero Redundancy Optimizer. The lecture states the key idea as eliminating data redundancy in DDP by partitioning optimizer states, gradients, and parameters across stages: ZeRO-1, ZeRO-2, and ZeRO-3. [CITE: llmsys-18-zero-key-idea]
+
+![ZeRO partitions optimizer state, gradients, and parameters in progressively deeper stages instead of replicating all training state on every data-parallel worker.](../figures/artwork/ch10/fig-10-zero-stages.svg)
 
 The original ZeRO paper frames the same goal as eliminating memory redundancies while retaining useful computational granularity and communication properties. [CITE: rajbhandari-2019-zero]
 
@@ -163,6 +167,8 @@ That lifetime management is the systems mechanism.
 ## ZeRO-3 Partitions Parameters
 
 ZeRO-3 partitions parameters themselves. The lecture describes partitioning parameters into `K` parts and communicating parameter partitions during forward and backward. [CITE: llmsys-18-zero-stage3-parameters]
+
+![ZeRO-3 keeps parameters sharded between uses and gathers the needed shards around layer computation during forward and backward execution.](../figures/artwork/ch10/fig-10-zero3-parameter-gather.svg)
 
 This is a stronger memory reduction because parameters are no longer fully resident on every worker. But the model computation still needs parameter values at the moment a layer runs. That means the runtime must make parameter shards available when needed and release unowned shards when they are no longer needed.
 
@@ -251,6 +257,8 @@ That is why ZeRO belongs after DDP and model parallelism. It is not another way 
 
 ZeRO reduces memory by partitioning training state. Mixture-of-Experts changes a different axis: which parameters are activated for each token.
 
+![A mixture-of-experts layer routes token representations from a shared input stream to selected expert FFNs and combines the expert outputs back into sequence order.](../figures/artwork/ch10/fig-10-moe-router-experts.svg)
+
 The MoE lecture defines Transformer MoE as replacing a single dense FFN with multiple expert FFNs and a router or gating network that selects one or more experts. [CITE: llmsys-17-moe-ffn-router]
 
 In a dense Transformer block, every token passes through the same FFN parameters:
@@ -282,6 +290,8 @@ These are not the same number. That is why MoE can increase model capacity witho
 
 The router is part of the model, but it also behaves like a scheduler. It decides where tokens go.
 
+![Router imbalance can overload some experts while leaving others underused, so MoE systems track and regularize expert load.](../figures/artwork/ch10/fig-10-load-balance-skew.svg)
+
 For each token, the router scores experts and chooses one or more expert paths. If many tokens choose the same expert, that expert's device becomes overloaded while others may sit underused. If the router spreads tokens more evenly, the system can use expert devices more effectively.
 
 This is not only a throughput issue. The lecture notes that MoE training uses load-balancing losses to avoid routing collapse to experts and to balance computation across experts or devices. [CITE: llmsys-17-moe-load-balancing]
@@ -303,6 +313,8 @@ This is why MoE is not just "a sparse FFN." It is conditional computation with a
 ## Expert Parallelism and All-to-All
 
 MoE becomes a distributed-systems problem when experts are placed on different devices. The lecture describes expert parallelism as splitting experts across devices while replicating non-expert components, and it states that expert parallelism requires all-to-all communication. [CITE: llmsys-17-expert-parallelism]
+
+![Expert parallelism dispatches tokens to devices that own selected experts and returns processed token outputs through all-to-all communication.](../figures/artwork/ch10/fig-10-expert-parallel-alltoall.svg)
 
 The flow is:
 

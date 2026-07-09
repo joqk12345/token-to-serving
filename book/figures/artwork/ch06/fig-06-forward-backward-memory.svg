@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">FlashAttention trades backward storage for recomputation</title>
+  <desc id="desc">The materialized path stores N by N probabilities. FlashAttention stores output and row statistics, then reloads input tiles to recompute attention blocks in backward.</desc>
+  <defs>
+    <style>.b{fill:#f7f8fa}.p{fill:#fff;stroke:#1f2933;stroke-width:2}.q{fill:#fff0d6;stroke:#9a6518;stroke-width:3}.st{fill:#dcefe5;stroke:#287052;stroke-width:2}.i{fill:#e8eef9;stroke:#355c9a;stroke-width:2}.c{fill:#f3e8fa;stroke:#70428e;stroke-width:2}.t{font:700 30px Arial;fill:#17212b}.h{font:700 19px Arial;fill:#17212b}.l{font:600 18px Arial;fill:#17212b}.s{font:400 15px Arial;fill:#44515d}.a{stroke:#53616d;stroke-width:3;fill:none;marker-end:url(#m)}</style>
+    <marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10z" fill="#53616d"/>
+    </marker>
+  </defs>
+  <rect class="b" width="1200" height="760"/>
+  <text class="t" x="65" y="60">Backward storage versus recomputation</text>
+  <text class="s" x="65" y="90">The tradeoff depends on memory traffic and hardware balance; recomputation is not categorically faster.</text>
+  <rect class="p" x="65" y="130" width="510" height="500" rx="6"/>
+  <text class="h" x="95" y="170">MATERIALIZED PATH</text>
+  <rect class="c" x="105" y="215" width="150" height="80" rx="5"/>
+  <text class="l" x="140" y="252">FORWARD</text>
+  <text class="s" x="135" y="275">compute P and O</text>
+  <path class="a" d="M255 255L315 255"/>
+  <rect class="q" x="325" y="195" width="210" height="190" rx="5"/>
+  <text class="l" x="390" y="235">STORE P</text>
+  <text class="h" x="395" y="290">N &#xD7; N</text>
+  <text class="s" x="360" y="330">attention probabilities</text>
+  <text class="s" x="375" y="355">resident in HBM</text>
+  <path class="a" d="M430 385L430 450L300 450"/>
+  <rect class="c" x="105" y="415" width="195" height="85" rx="5"/>
+  <text class="l" x="150" y="453">BACKWARD</text>
+  <text class="s" x="150" y="478">read stored P</text>
+  <text class="s" x="95" y="565">Benefit: avoids recomputing P.</text>
+  <text class="s" x="95" y="590">Cost: retains and rereads a quadratic intermediate.</text>
+  <rect class="p" x="625" y="130" width="510" height="500" rx="6"/>
+  <text class="h" x="655" y="170">FLASHATTENTION PATH</text>
+  <rect class="c" x="665" y="215" width="150" height="80" rx="5"/>
+  <text class="l" x="700" y="252">FORWARD</text>
+  <text class="s" x="688" y="275">blockwise attention</text>
+  <path class="a" d="M815 255L865 255"/>
+  <rect class="st" x="875" y="195" width="220" height="190" rx="5"/>
+  <text class="l" x="915" y="235">STORE ROW STATE</text>
+  <text class="s" x="920" y="290">output O</text>
+  <text class="s" x="920" y="325">maxima m</text>
+  <text class="s" x="920" y="360">normalization sums l</text>
+  <rect class="i" x="665" y="420" width="160" height="90" rx="5"/>
+  <text class="l" x="715" y="455">Q / K / V</text>
+  <text class="s" x="697" y="482">reload input tiles</text>
+  <path class="a" d="M825 465L875 465M985 385L985 420"/>
+  <rect class="c" x="875" y="420" width="220" height="90" rx="5"/>
+  <text class="l" x="925" y="455">BACKWARD</text>
+  <text class="s" x="902" y="482">recompute attention blocks</text>
+  <text class="s" x="655" y="565">Benefit: avoids storing and rereading full P.</text>
+  <text class="s" x="655" y="590">Cost: performs additional block computation.</text>
+  <text class="s" x="65" y="690">This is selective recomputation aligned with tiled attention and the GPU memory hierarchy.</text>
+</svg>

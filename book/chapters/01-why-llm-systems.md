@@ -26,6 +26,8 @@ The important word is **systems**. A large language model is not only a model. I
 
 The mathematical contract begins simply. A language model assigns a probability to the next token given the prompt and the previous tokens:
 
+![A language model assigns sequence probability by multiplying conditional next-token probabilities, where each token is predicted from the previous context.](../figures/artwork/ch01/fig-01-token-probability-chain.svg)
+
 ```text
 P(next token | prompt, previous tokens)
 ```
@@ -36,9 +38,9 @@ This appears in next-word prediction form:
 P(next word y_t | Prompt x, previous words y_1:t-1)
 ```
 
-In a modern LLM book, it is more precise to say token rather than word, because the model normally reads and writes subword, byte, or byte-pair units rather than human words. The conditional structure is the same. The model sees a prefix and scores possible continuations. [CITE: llmsys-01-next-token-probability]
+In a modern LLM book, it is more precise to say token rather than word, because the model normally reads and writes subword, byte, or byte-pair units rather than human words. The conditional structure is the same. The model sees a prefix and scores possible continuations. \[CITE: llmsys-01-next-token-probability]
 
-For a sequence, the model repeats the same idea. The probability of a sentence can be written as a product of conditional probabilities: first token, second token given the first, third token given the first two, and so on. Training pushes the model to assign high probability to the observed next token in real text. The common loss is cross-entropy for next-token prediction. [CITE: llmsys-01-training-objective]
+For a sequence, the model repeats the same idea. The probability of a sentence can be written as a product of conditional probabilities: first token, second token given the first, third token given the first two, and so on. Training pushes the model to assign high probability to the observed next token in real text. The common loss is cross-entropy for next-token prediction. \[CITE: llmsys-01-training-objective]
 
 This simple contract explains why one model can appear to do many things. Translation, summarization, code generation, question answering, and style transfer can all be framed as: given this input sequence, produce a useful output sequence.
 
@@ -57,7 +59,7 @@ At each step, tokens index an embedding table. The resulting vectors pass throug
 - softmax;
 - memory movement.
 
-These are the common computation layers and low-level operators that show up in language models. [CITE: llmsys-01-system-challenges]
+These are the common computation layers and low-level operators that show up in language models. \[CITE: llmsys-01-system-challenges]
 
 Once the model is small, these details are implementation. Once the model is large, they become the main problem. The same next-token objective may require thousands of GPUs to train, careful partitioning to fit in memory, specialized kernels to keep hardware busy, and a serving runtime that can batch requests without breaking latency targets.
 
@@ -67,7 +69,7 @@ The model is a probability distribution. The system is the machinery that makes 
 
 Language models come in several architectural families. Encoder-only models, such as BERT-style masked language models, are built for representation and prediction over masked positions. Encoder-decoder models read an input sequence with an encoder and generate an output sequence with a decoder. Decoder-only models generate autoregressively, conditioning each next token on the previous tokens.
 
-Decoder-only causal language models are the most common architecture choice for modern LLMs. [CITE: llmsys-01-decoder-only]
+Decoder-only causal language models are the most common architecture choice for modern LLMs. \[CITE: llmsys-01-decoder-only]
 
 That choice matters for systems. Autoregressive generation has a serial dependency: token `t + 1` depends on token `t`. During training, many positions can be processed in parallel under a causal mask. During inference, generation usually advances one token at a time for each sequence. That difference will later explain why training throughput, inference throughput, and user-visible latency are different system problems.
 
@@ -76,6 +78,8 @@ This book will mostly reason from the decoder-only case because it is the domina
 ## Capability Is Not the Same as Infrastructure
 
 Common LLM capabilities include translation, commonsense reasoning, math reasoning, code generation, text rewriting, and image-prompt generation. The point is not that every example is perfect, or that a model "understands" all tasks in a human sense. The point is that a broad set of AI tasks can be exposed through the same token interface.
+
+![A user sees a prompt and response, but the system path underneath includes tokenization, embedding lookup, Transformer computation, runtime scheduling, memory movement, and accelerator execution.](../figures/artwork/ch01/fig-01-visible-vs-hidden-stack.svg)
 
 That interface hides a systems stack.
 
@@ -123,7 +127,7 @@ This is the first habit of LLM systems work: translate model size and workload s
 
 A naive performance story says: make the math faster. That story is incomplete.
 
-Making computation fast is not enough. Data transfer takes time. Large models have many parameters. Training moves gradients and optimizer states. Inference moves weights, activations, and KV-cache tensors. Long-context LLMs require large working memory. [CITE: llmsys-01-system-challenges]
+Making computation fast is not enough. Data transfer takes time. Large models have many parameters. Training moves gradients and optimizer states. Inference moves weights, activations, and KV cache tensors. Long-context LLMs require large working memory. [CITE: llmsys-01-system-challenges]
 
 This distinction appears throughout the book.
 
@@ -134,6 +138,8 @@ A good LLM systems engineer asks which bottleneck is active before optimizing.
 ## Abstractions Decide What Engineers Can Build
 
 A useful abstraction hides one concern while still supporting a wide range of applications.
+
+![LLM systems can be viewed as an abstraction ladder: product behavior depends on frameworks, operators, kernels, runtimes, and hardware, and the active bottleneck may appear at any layer.](../figures/artwork/ch01/fig-01-abstraction-levels.svg)
 
 At the upper level, engineers integrate models into product systems and track quality over time. At the middle level, they build training and inference software, runtime systems, and streaming dataflows. At the lower level, they write kernels, compilers, and hardware-specific code. [CITE: llmsys-01-system-challenges]
 
@@ -149,9 +155,11 @@ That is why this book moves up and down the stack. The reader needs the model ob
 
 LLMs need model-algorithm-system co-design. Model architecture, training and inference algorithms, software optimization, and hardware acceleration must be designed together. [CITE: llmsys-01-codesign]
 
+![Model architecture, algorithms, software systems, and hardware form a feedback loop: changes in one layer can expose or relieve bottlenecks in another.](../figures/artwork/ch01/fig-01-codesign-loop.svg)
+
 This is not a slogan. It is a constraint.
 
-An attention variant that reduces asymptotic memory may still perform poorly if it maps badly to GPU memory access. A quantization method that reduces weight memory may not improve latency if decoding is dominated by KV-cache bandwidth. A model-parallel strategy that fits the model may lose the gain through communication overhead. A batching strategy that improves throughput may harm tail latency for interactive users.
+An attention variant that reduces asymptotic memory may still perform poorly if it maps badly to GPU memory access. A quantization method that reduces weight memory may not improve latency if decoding is dominated by KV cache bandwidth. A model-parallel strategy that fits the model may lose the gain through communication overhead. A batching strategy that improves throughput may harm tail latency for interactive users.
 
 Every layer changes the tradeoff surface for the layers above and below it.
 

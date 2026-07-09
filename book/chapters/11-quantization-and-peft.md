@@ -71,6 +71,8 @@ That distinction is important. A quantized model can still be hard to fine-tune 
 
 The quantization lecture defines model quantization as using low-bit precision to store parameters and layer outputs. It can reduce memory and may improve calculation throughput, but can also reduce accuracy. [CITE: llmsys-19-quantization-purpose]
 
+![Quantization maps high-precision values into discrete integer levels using scale metadata and, for some schemes, a zero point.](../figures/artwork/ch11/fig-11-quantization-map.svg)
+
 The basic idea is to map a real-valued tensor into a smaller set of representable values:
 
 ```text
@@ -91,6 +93,8 @@ Lower precision does not automatically mean faster inference. If a kernel has to
 ## Scale, Zero Point, and Error
 
 A quantizer maps a real value to an integer code. The simplest version uses a scale:
+
+![Quantization error can arise from rounding within buckets, clipping outside the chosen range, or a range estimate that mismatches the data distribution.](../figures/artwork/ch11/fig-11-quantization-error.svg)
 
 ```text
 q = round(x / s)
@@ -155,6 +159,8 @@ Layer-wise calibration also has a limitation: local output matching does not aut
 
 ZeroQuant and LLM.int8 are useful because they show two different responses to the same problem: naive low-bit conversion is too brittle for large Transformer models.
 
+![LLM.int8-style execution routes typical values through an int8 path while handling outlier components through a higher-precision path before combining results.](../figures/artwork/ch11/fig-11-llmint8-outlier-path.svg)
+
 ZeroQuant uses layer-by-layer knowledge distillation. The lecture describes the full-precision model as the teacher and the quantized model as the student. [CITE: llmsys-19-zeroquant]
 
 That is a calibration strategy:
@@ -185,6 +191,8 @@ If most values quantize well but a small set of activation dimensions has large 
 ## GPTQ: Quantize, Measure Error, Compensate
 
 GPTQ is a post-training weight quantization method for generative Transformers. The lecture presents its goal as quantizing very large models while maintaining accuracy through layer-wise weight-matrix quantization. [CITE: llmsys-20-gptq-goal]
+
+![GPTQ-style quantization accounts for quantization error by updating remaining weights after a column or block is quantized.](../figures/artwork/ch11/fig-11-gptq-compensation.svg)
 
 The GPTQ paper describes it as one-shot weight quantization using approximate second-order information. [CITE: frantar-2022-gptq]
 
@@ -232,6 +240,8 @@ This chapter deliberately avoids GPTQ benchmark numbers. The value of a quantize
 
 Quantization changes representation. PEFT changes what is trained.
 
+![Full fine-tuning trains the base model state, while LoRA freezes the base weights and trains smaller adapter matrices with their own gradient and optimizer state.](../figures/artwork/ch11/fig-11-full-ft-vs-lora-state.svg)
+
 Full fine-tuning updates all model parameters. That means the system needs gradient and optimizer state for all trainable parameters. Chapter 10's ledger returns:
 
 ```text
@@ -270,6 +280,8 @@ This chapter focuses on LoRA because its system tradeoff is especially direct: f
 ## LoRA: Low-Rank Updates
 
 LoRA freezes pretrained weights and trains a low-rank update. The lecture writes the adapted weight as:
+
+![LoRA represents an adapted weight as a frozen base matrix plus a trainable low-rank update.](../figures/artwork/ch11/fig-11-lora-update.svg)
 
 ```text
 W' = W0 + A B
@@ -329,6 +341,8 @@ The low-rank update is the math. Target-module selection, adapter storage, mergi
 ## QLoRA Combines Quantization and Low-Rank Training
 
 QLoRA connects the two halves of this chapter. The lecture describes it as quantization plus low-rank training. [CITE: llmsys-23-qlora-quantized-lora]
+
+![QLoRA combines a quantized frozen base model with trainable low-rank adapters, separating base-model storage from adapter training.](../figures/artwork/ch11/fig-11-qlora-stack.svg)
 
 The QLoRA paper states that gradients are backpropagated through a frozen 4-bit quantized pretrained language model into LoRA adapters, and introduces NF4, double quantization, and paged optimizers. [CITE: dettmers-2023-qlora]
 

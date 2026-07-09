@@ -72,6 +72,8 @@ The cost model has to include all three.
 
 Autoregressive generation produces text one token at a time. ORCA describes Transformer-based generative inference as multiple model iterations, where each iteration generates a single output token. [CITE: yu-2022-orca-autoregressive-iterations]
 
+![Inference begins with prompt prefill, which processes the input context, then moves into decode steps that append one generated token at a time while updating the KV cache.](../figures/artwork/ch12/fig-12-prefill-decode.svg)
+
 In serving systems, it is useful to split a request into two phases:
 
 ```text
@@ -127,6 +129,8 @@ KV memory limits how many requests can stay active
 
 Batching is natural for GPU utilization. Training uses batches constantly. But serving batches are different because requests have different output lengths.
 
+![Request-level batching can leave shorter generations waiting on longer ones, tying batch progress to the slowest unfinished request.](../figures/artwork/ch12/fig-12-request-level-batching-problem.svg)
+
 The serving lecture describes the challenge: a request batch may lead to different generation lengths, and a naive implementation waits for the longest sequence. [CITE: llmsys-22-naive-batch-longest]
 
 ORCA makes the same point at the paper level. Under request-level scheduling, finished requests can wait for the whole batch, and newly arrived requests can wait for the current batch to finish. [CITE: yu-2022-orca-request-level-limitation]
@@ -153,6 +157,8 @@ when can new requests enter?
 
 Continuous batching changes the scheduling granularity. Instead of choosing a batch and waiting for every request in it to finish, the scheduler updates the active set between generation iterations.
 
+![Continuous batching changes active batch membership between decode iterations, adding new requests and removing completed ones as the scheduler advances.](../figures/artwork/ch12/fig-12-continuous-batching.svg)
+
 The serving lecture describes continuous batching as iteration-level scheduling: at each token-generation step, schedule a new request whenever one request finishes in a batch. [CITE: llmsys-22-continuous-batching]
 
 ORCA calls this iteration-level scheduling: the serving system invokes the execution engine to run one model iteration on a batch, then can update request membership. [CITE: yu-2022-orca-iteration-level-scheduling]
@@ -172,7 +178,9 @@ Continuous batching improves the system's ability to keep the GPU occupied under
 
 ## Selective Batching
 
-A Transformer block contains operations with different batching behavior. Linear layers, layer normalization, and elementwise operations can often benefit from batching across requests. Attention is harder when requests have different processed lengths and KV-cache states.
+A Transformer block contains operations with different batching behavior. Linear layers, layer normalization, and elementwise operations can often benefit from batching across requests. Attention is harder when requests have different processed lengths and KV cache states.
+
+![Selective batching separates operations that batch cleanly across requests from attention and cache operations that depend on request-specific state.](../figures/artwork/ch12/fig-12-selective-batching.svg)
 
 The serving lecture describes selective batching as batching non-attention operations while attention is executed by an attention engine. [CITE: llmsys-22-selective-batching]
 
@@ -193,6 +201,8 @@ This is the operation-level version of the serving problem. Not all work in a ba
 ## The Scheduler Is Part of the Critical Path
 
 The scheduler does more than maintain a queue. The serving lecture lists scheduler responsibilities: receive input requests, stream outputs, check stop conditions, reorder requests, prepare batches, and allocate memory for next and running batches. [CITE: llmsys-22-request-scheduler]
+
+![An inference scheduler repeatedly admits requests, forms model-step batches, returns streamed tokens, updates memory state, and frees completed requests.](../figures/artwork/ch12/fig-12-scheduler-loop.svg)
 
 A simplified loop:
 
@@ -222,6 +232,8 @@ it can become part of the model's effective latency
 
 During decode, the model needs attention keys and values from previous tokens. Recomputing them every step would be wasteful. Transformer serving systems therefore store keys and values for previous tokens in GPU memory as a KV cache. [CITE: llmsys-22-kv-cache-need]
 
+![During autoregressive decoding, each generated token adds per-layer key and value state that future decode steps reuse.](../figures/artwork/ch12/fig-12-kv-cache-cost.svg)
+
 This changes the memory model:
 
 ```text
@@ -243,7 +255,7 @@ attention head dimensions
 precision
 ```
 
-This chapter intentionally avoids KV-cache byte formulas. Chapter 13 will study KV-cache and PagedAttention in detail. For the inference cost model, the key point is:
+This chapter intentionally avoids KV cache byte formulas. Chapter 13 will study KV cache and PagedAttention in detail. For the inference cost model, the key point is:
 
 ```text
 active tokens consume persistent serving memory
@@ -254,6 +266,8 @@ The scheduler cannot admit requests based only on compute availability. It also 
 ## Prefix Reuse and Cache-Aware Scheduling
 
 Many serving workloads contain repeated prefixes. A chat system may reuse prior conversation state. An in-context learning application may send the same examples with many queries. A system prompt may appear across many requests.
+
+![Prefix caching can reuse work for requests with shared prompt prefixes when the scheduler routes them to workers that already hold matching cached state.](../figures/artwork/ch12/fig-12-prefix-cache-routing.svg)
 
 RadixAttention stores KV memory pointers in a radix tree keyed by prompt prefixes. [CITE: llmsys-22-radixattention-prefix-cache]
 

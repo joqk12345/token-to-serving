@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Standard attention materializes quadratic intermediates</title>
+  <desc id="desc">Q and K produce score matrix S in HBM. Softmax produces probability matrix P in HBM. P and V produce O.</desc>
+  <defs>
+    <style>.b{fill:#f7f8fa}.p{fill:#fff;stroke:#1f2933;stroke-width:2}.i{fill:#e8eef9;stroke:#355c9a;stroke-width:2}.q{fill:#fff0d6;stroke:#9a6518;stroke-width:3}.o{fill:#dcefe5;stroke:#287052;stroke-width:2}.t{font:700 30px Arial;fill:#17212b}.h{font:700 19px Arial;fill:#17212b}.l{font:600 18px Arial;fill:#17212b}.s{font:400 15px Arial;fill:#44515d}.a{stroke:#53616d;stroke-width:3;fill:none;marker-end:url(#m)}</style>
+    <marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10z" fill="#53616d"/>
+    </marker>
+  </defs>
+  <rect class="b" width="1200" height="760"/>
+  <text class="t" x="65" y="60">Standard attention materializes N × N intermediates</text>
+  <text class="s" x="65" y="90">One head: Q, K, V, O are N &#xD7; d; S and P are N &#xD7; N.</text>
+  <rect class="p" x="65" y="130" width="1070" height="500" rx="6"/>
+  <text class="h" x="95" y="170">COMMON MATERIALIZED DATAFLOW</text>
+  <rect class="i" x="95" y="230" width="120" height="80" rx="5"/>
+  <text class="l" x="145" y="265">Q</text>
+  <text class="s" x="130" y="290">N &#xD7; d</text>
+  <rect class="i" x="95" y="350" width="120" height="80" rx="5"/>
+  <text class="l" x="145" y="385">K</text>
+  <text class="s" x="130" y="410">N &#xD7; d</text>
+  <path class="a" d="M215 270L285 320M215 390L285 345"/>
+  <rect class="o" x="295" y="285" width="130" height="90" rx="45"/>
+  <text class="l" x="330" y="325">QK&#x1D40;</text>
+  <text class="s" x="337" y="350">GEMM</text>
+  <path class="a" d="M425 330L485 330"/>
+  <rect class="q" x="495" y="215" width="180" height="230" rx="5"/>
+  <text class="l" x="578" y="260">S</text>
+  <text class="h" x="543" y="325">N &#xD7; N</text>
+  <text class="s" x="535" y="370">written to HBM</text>
+  <path class="a" d="M675 330L725 330"/>
+  <rect class="o" x="735" y="285" width="140" height="90" rx="45"/>
+  <text class="l" x="770" y="337">softmax</text>
+  <path class="a" d="M875 330L925 330"/>
+  <rect class="q" x="935" y="215" width="170" height="230" rx="5"/>
+  <text class="l" x="1013" y="260">P</text>
+  <text class="h" x="978" y="325">N &#xD7; N</text>
+  <text class="s" x="970" y="370">written to HBM</text>
+  <rect class="i" x="735" y="485" width="120" height="75" rx="5"/>
+  <text class="l" x="785" y="520">V</text>
+  <text class="s" x="770" y="545">N &#xD7; d</text>
+  <path class="a" d="M1020 445L1020 500L955 500M855 522L935 522"/>
+  <rect class="o" x="945" y="480" width="105" height="80" rx="40"/>
+  <text class="l" x="975" y="527">PV</text>
+  <path class="a" d="M1050 520L1090 520"/>
+  <text class="l" x="1095" y="527">O</text>
+  <text class="s" x="65" y="690">Both N &#xD7; N matrices may be written to and read from HBM; memory traffic is part of the cost.</text>
+</svg>

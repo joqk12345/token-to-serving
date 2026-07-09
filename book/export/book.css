@@ -1,0 +1,128 @@
+:root {
+      color-scheme: light;
+      --ink: #18212f;
+      --muted: #566173;
+      --border: #d9e0ea;
+      --paper: #ffffff;
+      --canvas: #f4f6f9;
+      --accent: #173e76;
+      --accent-soft: #e8eef8;
+      --code-bg: #f6f8fb;
+    }
+    html { background: var(--canvas); }
+    body {
+      margin: 0 auto;
+      max-width: 980px;
+      padding: 24px 18px 80px;
+      font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+      color: var(--ink);
+      background: var(--paper);
+      box-shadow: 0 20px 60px rgba(15, 23, 42, .08);
+    }
+    header#title-block-header {
+      padding: 36px 36px 8px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 28px;
+    }
+    h1.title {
+      margin: 0 0 10px;
+      font-size: clamp(30px, 4vw, 48px);
+      line-height: 1.05;
+      letter-spacing: -.02em;
+    }
+    #TOC {
+      background: var(--accent-soft);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 22px;
+      margin: 0 36px 34px;
+    }
+    #TOC > ul { columns: 2; column-gap: 28px; }
+    #TOC a { color: var(--accent); text-decoration: none; }
+    #TOC a:hover { text-decoration: underline; }
+    h1, h2, h3, h4 { line-height: 1.2; scroll-margin-top: 28px; }
+    h1:not(.title) {
+      margin-top: 56px;
+      padding-top: 18px;
+      border-top: 2px solid var(--border);
+      break-before: page;
+      page-break-before: always;
+    }
+    h1.part-title {
+      color: var(--accent);
+      font-size: 30px;
+    }
+    h2.chapter-title {
+      margin-top: 42px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      break-before: page;
+      page-break-before: always;
+    }
+    h2 { margin-top: 34px; }
+    h3 { margin-top: 24px; }
+    h4 { margin-top: 20px; }
+    p, li { line-height: 1.74; font-size: 16px; }
+    blockquote {
+      margin: 18px 0;
+      padding: 0 18px;
+      border-left: 4px solid var(--accent);
+      color: #243246;
+    }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.94em;
+    }
+    code {
+      background: var(--code-bg);
+      padding: 0.1em 0.3em;
+      border-radius: 4px;
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 18px;
+      overflow: auto;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 18px 0 24px;
+      font-size: 15px;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 8px 10px;
+      vertical-align: top;
+    }
+    th { background: var(--accent-soft); }
+    a { color: var(--accent); }
+    .chapter-title { page-break-after: avoid; }
+    figure {
+      margin: 28px auto 24px;
+      text-align: center;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
+    figure img {
+      max-width: 100%;
+      height: auto;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #fff;
+    }
+    figure figcaption {
+      margin-top: 10px;
+      font-size: 14px;
+      line-height: 1.45;
+      color: var(--muted);
+      text-align: left;
+    }
+    @media print {
+      @page { size: letter; margin: 0.65in; }
+      body { box-shadow: none; max-width: none; padding: 0 18mm 16mm; }
+      #TOC { margin-left: 0; margin-right: 0; }
+      h1:not(.title), h2.chapter-title { break-before: page; page-break-before: always; }
+      figure img { border: none; border-radius: 0; }
+    }
