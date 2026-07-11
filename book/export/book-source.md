@@ -1,13 +1,45 @@
 ---
-title: "Large Language Model Systems: From Tokens to Serving Infrastructure"
-author: "gizamo"
-subtitle: "The Complete Engineering Journey from Tokens to Serving Infrastructure"
+pagetitle: "Large Language Model Systems: From Tokens to Serving Infrastructure"
 lang: en
 ---
 
-# Part I — The Shape of the Problem {.part-title}
+\thispagestyle{empty}
 
-## Chapter 1: Why LLMs Are Systems Problems {.chapter-title}
+![](../figures/artwork/book-cover.svg){.book-cover width=85%}
+
+\newpage
+
+# Contents {#contents .contents-title}
+
+- [Part I — The Shape of the Problem](#part-i-the-shape-of-the-problem)
+  - [Chapter 1: Why LLMs Are Systems Problems](#chapter-1-why-llms-are-systems-problems)
+  - [Chapter 2: From Next-Token Probability to Transformer Computation](#chapter-2-from-next-token-probability-to-transformer-computation)
+  - [Chapter 3: Tokenization, Context, and Decoding](#chapter-3-tokenization-context-and-decoding)
+- [Part II — Single-Device Computation](#part-ii-single-device-computation)
+  - [Chapter 4: Inside the GPU Programming Model](#chapter-4-inside-the-gpu-programming-model)
+  - [Chapter 5: Kernels, Memory, and Transformer Blocks](#chapter-5-kernels-memory-and-transformer-blocks)
+  - [Chapter 6: FlashAttention and Attention Acceleration](#chapter-6-flashattention-and-attention-acceleration)
+- [Part III — Training Systems](#part-iii-training-systems)
+  - [Chapter 7: Deep Learning Frameworks, JAX, XLA, and TPU](#chapter-7-deep-learning-frameworks-jax-xla-and-tpu)
+  - [Chapter 8: Distributed Training and Data Parallelism](#chapter-8-distributed-training-and-data-parallelism)
+  - [Chapter 9: Model Parallelism](#chapter-9-model-parallelism)
+  - [Chapter 10: ZeRO, MoE, and Training Memory](#chapter-10-zero-moe-and-training-memory)
+- [Part IV — Adaptation and Compression](#part-iv-adaptation-and-compression)
+  - [Chapter 11: Quantization and Parameter-Efficient Adaptation](#chapter-11-quantization-and-parameter-efficient-adaptation)
+- [Part V — Inference and Serving](#part-v-inference-and-serving)
+  - [Chapter 12: The Cost Model of LLM Inference](#chapter-12-the-cost-model-of-llm-inference)
+  - [Chapter 13: KV Cache, PagedAttention, and vLLM](#chapter-13-kv-cache-pagedattention-and-vllm)
+  - [Chapter 14: Scheduling, Caching, and Disaggregated Serving](#chapter-14-scheduling-caching-and-disaggregated-serving)
+- [Part VI — System Design Synthesis](#part-vi-system-design-synthesis)
+  - [Chapter 15: Model-Algorithm-System Co-Design](#chapter-15-model-algorithm-system-co-design)
+- [References](#references)
+- [Index](#index)
+
+\newpage
+
+# Part I — The Shape of the Problem {#part-i-the-shape-of-the-problem .part-title}
+
+## Chapter 1: Why LLMs Are Systems Problems {#chapter-1-why-llms-are-systems-problems .chapter-title}
 
 A user types a prompt. The model answers in fluent sentences. At the surface, the system looks like a language interface: translate this, summarize that, write a function, solve a word problem, polish an email.
 
@@ -173,7 +205,7 @@ Assumptions: The chapter should map the book and introduce bottlenecks without d
 Open questions: Whether to add a historical model-scale sidebar in a later revision  
 Handoff: Production can move to book-level consistency audit
 
-## Chapter 2: From Next-Token Probability to Transformer Computation {.chapter-title}
+## Chapter 2: From Next-Token Probability to Transformer Computation {#chapter-2-from-next-token-probability-to-transformer-computation .chapter-title}
 
 The previous chapter reduced language modeling to a simple contract:
 
@@ -338,7 +370,7 @@ Assumptions: This chapter should make Transformer computation legible and defer 
 Open questions: Whether to turn encoder-decoder versus decoder-only contrast into a compact table during later copyedit  
 Handoff: Production can move to book-level consistency audit
 
-## Chapter 3: Tokenization, Context, and Decoding {.chapter-title}
+## Chapter 3: Tokenization, Context, and Decoding {#chapter-3-tokenization-context-and-decoding .chapter-title}
 
 The Transformer does not read text. It reads token IDs.
 
@@ -517,9 +549,9 @@ Assumptions: This chapter introduces decoding concepts and defers serving archit
 Open questions: Whether tokenizer-free models belong as a later sidebar  
 Handoff: Production can move to book-level consistency audit
 
-# Part II — Single-Device Computation {.part-title}
+# Part II — Single-Device Computation {#part-ii-single-device-computation .part-title}
 
-## Chapter 4: Inside the GPU Programming Model {.chapter-title}
+## Chapter 4: Inside the GPU Programming Model {#chapter-4-inside-the-gpu-programming-model .chapter-title}
 
 The previous chapters turned text into a workload. Tokens become vectors. Vectors pass through attention, feed-forward layers, normalization, softmax, and output projections. Decoding repeats part of that computation one token at a time.
 
@@ -723,7 +755,7 @@ Assumptions: Chapter 4 uses minimal CUDA snippets, not full compilable examples
 Open questions: Decide whether runnable CUDA examples belong in appendix or examples directory  
 Handoff: Production can move to front-half Chapter 1-3 reviews or book-level consistency audit
 
-## Chapter 5: Kernels, Memory, and Transformer Blocks {.chapter-title}
+## Chapter 5: Kernels, Memory, and Transformer Blocks {#chapter-5-kernels-memory-and-transformer-blocks .chapter-title}
 
 Chapter 4 made a GPU program concrete. The host launches a kernel. The device runs many threads. Threads are grouped into blocks and warps. Each thread maps its identity to data.
 
@@ -969,7 +1001,7 @@ Assumptions: Chapter 5 explains performance patterns and defers FlashAttention d
 Open questions: Add primary LightSeq/LightSeq2 cards if the final chapter keeps named case-study detail  
 Handoff: Production can move to front-half Chapter 1-3 reviews or book-level consistency audit
 
-## Chapter 6: FlashAttention and Attention Acceleration {.chapter-title}
+## Chapter 6: FlashAttention and Attention Acceleration {#chapter-6-flashattention-and-attention-acceleration .chapter-title}
 
 Chapter 5 introduced the recurring GPU performance pattern: a correct tensor program may still be slow if it moves too much data. Tiling, coalescing, fusion, reduction-aware kernels, mixed precision, and memory reuse are all ways to change the shape of memory traffic.
 
@@ -1216,9 +1248,9 @@ Assumptions: Chapter 6 explains IO-aware exact attention and avoids unqualified 
 Open questions: Decide whether final publication should keep the one-row online-softmax derivation or use paper notation  
 Handoff: Production can move to front-half Chapter 1-3 reviews or book-level consistency audit
 
-# Part III — Training Systems {.part-title}
+# Part III — Training Systems {#part-iii-training-systems .part-title}
 
-## Chapter 7: Deep Learning Frameworks, JAX, XLA, and TPU {.chapter-title}
+## Chapter 7: Deep Learning Frameworks, JAX, XLA, and TPU {#chapter-7-deep-learning-frameworks-jax-xla-and-tpu .chapter-title}
 
 The previous chapters moved downward through the stack. A Transformer became tensor operations. Tensor operations became kernels. Kernels became memory traffic, tiling, reductions, fusion, and attention schedules.
 
@@ -1794,7 +1826,7 @@ Assumptions: The chapter uses JAX/XLA/TPU as a case study for framework/compiler
 Open questions: Add narrower cards only if later revisions introduce precise JAXpr internals, Pallas `BlockSpec` API behavior, TPU backend microarchitecture, or exact StableHLO compatibility guarantees  
 Handoff: Production can move to Chapter 8 source extraction
 
-## Chapter 8: Distributed Training and Data Parallelism {.chapter-title}
+## Chapter 8: Distributed Training and Data Parallelism {#chapter-8-distributed-training-and-data-parallelism .chapter-title}
 
 Chapter 7 ended with a single training step becoming an executable program. That is still a one-replica view of training. Large models and large datasets quickly force a wider question:
 
@@ -2098,7 +2130,7 @@ Assumptions: Chapter 8 focuses on synchronous data parallelism and DDP, leaving 
 Open questions: Add ring all-reduce byte-count formulas only if a later revision can carry topology/message-size/full-duplex/per-rank assumptions  
 Handoff: Production can move to Chapter 9 source extraction
 
-## Chapter 9: Model Parallelism {.chapter-title}
+## Chapter 9: Model Parallelism {#chapter-9-model-parallelism .chapter-title}
 
 Chapter 8 stopped at a hard boundary:
 
@@ -2463,7 +2495,7 @@ Assumptions: Chapter 9 covers pipeline and tensor parallelism; ZeRO, optimizer-s
 Open questions: Add formulas for pipeline bubbles or activation memory only if a later revision carries explicit schedule assumptions
 Handoff: Production can move to Chapter 10 source extraction
 
-## Chapter 10: ZeRO, MoE, and Training Memory {.chapter-title}
+## Chapter 10: ZeRO, MoE, and Training Memory {#chapter-10-zero-moe-and-training-memory .chapter-title}
 
 Chapter 9 partitioned model computation. Pipeline parallelism split layers. Tensor parallelism split matrix operations. Those techniques answer one question:
 
@@ -2913,9 +2945,9 @@ Assumptions: ZeRO formulas are presented only under the lecture's simplified `N`
 Open questions: Whether to add PyTorch FSDP or ZeRO++ source cards in a later revision
 Handoff: Production can move to Chapter 11 source extraction
 
-# Part IV — Adaptation and Compression {.part-title}
+# Part IV — Adaptation and Compression {#part-iv-adaptation-and-compression .part-title}
 
-## Chapter 11: Quantization and Parameter-Efficient Adaptation {.chapter-title}
+## Chapter 11: Quantization and Parameter-Efficient Adaptation {#chapter-11-quantization-and-parameter-efficient-adaptation .chapter-title}
 
 Chapter 10 treated memory as a training-systems ledger. ZeRO changed where optimizer states, gradients, and parameters live. MoE changed which expert parameters each token activates.
 
@@ -3322,9 +3354,9 @@ Assumptions: Chapter 11 focuses on mechanisms and systems tradeoffs; detailed be
 Open questions: Whether to add a deeper QLoRA source pass for NF4, double quantization, and paged optimizers
 Handoff: Production can move to Chapter 12 source extraction
 
-# Part V — Inference and Serving {.part-title}
+# Part V — Inference and Serving {#part-v-inference-and-serving .part-title}
 
-## Chapter 12: The Cost Model of LLM Inference {.chapter-title}
+## Chapter 12: The Cost Model of LLM Inference {#chapter-12-the-cost-model-of-llm-inference .chapter-title}
 
 Training systems work on known batches. Serving systems do not.
 
@@ -3674,7 +3706,7 @@ Assumptions: Chapter 12 is a conceptual inference cost-model chapter; detailed P
 Open questions: Whether to add formal TTFT/TPOT terminology with dedicated source cards in a later revision
 Handoff: Production can move to Chapter 13 source extraction
 
-## Chapter 13: KV Cache, PagedAttention, and vLLM {.chapter-title}
+## Chapter 13: KV Cache, PagedAttention, and vLLM {#chapter-13-kv-cache-pagedattention-and-vllm .chapter-title}
 
 Chapter 12 described inference as an online cost model: prefill, decode, batching, scheduling, and KV cache memory all interact. This chapter zooms into the memory term.
 
@@ -4047,7 +4079,7 @@ Assumptions: This draft focuses on single-engine KV cache memory management and 
 Open questions: Whether to add a KV cache byte formula, block-size waste derivation, or copy-on-write detail after a narrower source pass
 Handoff: Production can move to Chapter 14 source extraction
 
-## Chapter 14: Scheduling, Caching, and Disaggregated Serving {.chapter-title}
+## Chapter 14: Scheduling, Caching, and Disaggregated Serving {#chapter-14-scheduling-caching-and-disaggregated-serving .chapter-title}
 
 Chapter 12 built an inference cost model. Chapter 13 showed why KV cache becomes a memory system inside an inference engine. This chapter moves up one level: distributed serving.
 
@@ -4453,9 +4485,9 @@ Assumptions: Draft explains mechanisms and tradeoffs without product evaluation 
 Open questions: Whether to add DistServe paper, official system docs, or deeper transfer API cards before technical review  
 Handoff: Production can move to Chapter 15 source extraction
 
-# Part VI — System Design Synthesis {.part-title}
+# Part VI — System Design Synthesis {#part-vi-system-design-synthesis .part-title}
 
-## Chapter 15: Model-Algorithm-System Co-Design {.chapter-title}
+## Chapter 15: Model-Algorithm-System Co-Design {#chapter-15-model-algorithm-system-co-design .chapter-title}
 
 The book began with a simple mathematical object:
 

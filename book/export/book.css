@@ -40,6 +40,23 @@
     #TOC > ul { columns: 2; column-gap: 28px; }
     #TOC a { color: var(--accent); text-decoration: none; }
     #TOC a:hover { text-decoration: underline; }
+    h1.contents-title {
+      margin: 40px 36px 16px;
+      padding-top: 0;
+      border-top: none;
+      color: var(--accent);
+    }
+    h1.contents-title + ul {
+      margin: 0 36px 34px;
+      padding: 20px 22px 20px 38px;
+      background: var(--accent-soft);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      columns: 2;
+      column-gap: 28px;
+    }
+    h1.contents-title + ul a { color: var(--accent); text-decoration: none; }
+    h1.contents-title + ul a:hover { text-decoration: underline; }
     h1, h2, h3, h4 { line-height: 1.2; scroll-margin-top: 28px; }
     h1:not(.title) {
       margin-top: 56px;
@@ -112,6 +129,16 @@
       border-radius: 10px;
       background: #fff;
     }
+    img.book-cover {
+      display: block;
+      width: min(100%, 760px);
+      height: auto;
+      margin: 0 auto 36px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      break-after: page;
+      page-break-after: always;
+    }
     figure figcaption {
       margin-top: 10px;
       font-size: 14px;
@@ -125,4 +152,11 @@
       #TOC { margin-left: 0; margin-right: 0; }
       h1:not(.title), h2.chapter-title { break-before: page; page-break-before: always; }
       figure img { border: none; border-radius: 0; }
+      img.book-cover {
+        width: 100%;
+        max-height: 9.1in;
+        object-fit: contain;
+        border: none;
+        border-radius: 0;
+      }
     }

@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <meta name="author" content="gizamo" />
-  <title>Large Language Model Systems: From Tokens to Serving Infrastructure</title>
+  <title>Large Language Model Systems: From Tokens to Serving
+Infrastructure</title>
   <style>
     /* Default styles provided by pandoc.
     ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
@@ -94,634 +94,72 @@
   <link rel="stylesheet" href="book.css" />
 </head>
 <body>
-<header id="title-block-header">
-<h1 class="title">Large Language Model Systems: From Tokens to Serving
-Infrastructure</h1>
-<p class="subtitle">The Complete Engineering Journey from Tokens to
-Serving Infrastructure</p>
-<p class="author">gizamo</p>
-</header>
-<nav id="TOC" role="doc-toc">
+<p><img src="../figures/artwork/book-cover.svg" class="book-cover"
+style="width:85.0%" /></p>
+<h1 class="contents-title" id="contents">Contents</h1>
 <ul>
-<li><a href="#part-i-the-shape-of-the-problem"
-id="toc-part-i-the-shape-of-the-problem">Part I — The Shape of the
+<li><a href="#part-i-the-shape-of-the-problem">Part I — The Shape of the
 Problem</a>
 <ul>
-<li><a href="#chapter-1-why-llms-are-systems-problems"
-id="toc-chapter-1-why-llms-are-systems-problems">Chapter 1: Why LLMs Are
-Systems Problems</a>
-<ul>
-<li><a href="#the-simple-contract" id="toc-the-simple-contract">The
-Simple Contract</a></li>
-<li><a href="#the-contract-becomes-a-tensor-program"
-id="toc-the-contract-becomes-a-tensor-program">The Contract Becomes a
-Tensor Program</a></li>
-<li><a href="#the-dominant-shape-decoder-only-autoregression"
-id="toc-the-dominant-shape-decoder-only-autoregression">The Dominant
-Shape: Decoder-Only Autoregression</a></li>
-<li><a href="#capability-is-not-the-same-as-infrastructure"
-id="toc-capability-is-not-the-same-as-infrastructure">Capability Is Not
-the Same as Infrastructure</a></li>
-<li><a href="#the-first-bottleneck-resources"
-id="toc-the-first-bottleneck-resources">The First Bottleneck:
-Resources</a></li>
-<li><a href="#computation-is-not-enough"
-id="toc-computation-is-not-enough">Computation Is Not Enough</a></li>
-<li><a href="#abstractions-decide-what-engineers-can-build"
-id="toc-abstractions-decide-what-engineers-can-build">Abstractions
-Decide What Engineers Can Build</a></li>
-<li><a href="#co-design-is-the-pattern"
-id="toc-co-design-is-the-pattern">Co-Design Is the Pattern</a></li>
-</ul></li>
+<li><a href="#chapter-1-why-llms-are-systems-problems">Chapter 1: Why
+LLMs Are Systems Problems</a></li>
 <li><a
-href="#chapter-2-from-next-token-probability-to-transformer-computation"
-id="toc-chapter-2-from-next-token-probability-to-transformer-computation">Chapter
-2: From Next-Token Probability to Transformer Computation</a>
-<ul>
-<li><a href="#from-sequence-probability-to-computation"
-id="toc-from-sequence-probability-to-computation">From Sequence
-Probability to Computation</a></li>
-<li><a href="#tokens-become-vectors"
-id="toc-tokens-become-vectors">Tokens Become Vectors</a></li>
-<li><a href="#attention-mixes-positions"
-id="toc-attention-mixes-positions">Attention Mixes Positions</a></li>
-<li><a href="#the-decoder-cannot-look-right"
-id="toc-the-decoder-cannot-look-right">The Decoder Cannot Look
-Right</a></li>
-<li><a href="#feed-forward-layers-transform-each-position"
-id="toc-feed-forward-layers-transform-each-position">Feed-Forward Layers
-Transform Each Position</a></li>
-<li><a href="#residuals-and-normalization-keep-the-stack-trainable"
-id="toc-residuals-and-normalization-keep-the-stack-trainable">Residuals
-and Normalization Keep the Stack Trainable</a></li>
-<li><a href="#training-uses-known-prefixes"
-id="toc-training-uses-known-prefixes">Training Uses Known
-Prefixes</a></li>
-<li><a
-href="#encoder-decoder-decoder-only-and-why-the-difference-matters"
-id="toc-encoder-decoder-decoder-only-and-why-the-difference-matters">Encoder-Decoder,
-Decoder-Only, and Why the Difference Matters</a></li>
-<li><a href="#a-transformer-block-as-a-systems-object"
-id="toc-a-transformer-block-as-a-systems-object">A Transformer Block as
-a Systems Object</a></li>
+href="#chapter-2-from-next-token-probability-to-transformer-computation">Chapter
+2: From Next-Token Probability to Transformer Computation</a></li>
+<li><a href="#chapter-3-tokenization-context-and-decoding">Chapter 3:
+Tokenization, Context, and Decoding</a></li>
 </ul></li>
-<li><a href="#chapter-3-tokenization-context-and-decoding"
-id="toc-chapter-3-tokenization-context-and-decoding">Chapter 3:
-Tokenization, Context, and Decoding</a>
-<ul>
-<li><a href="#tokens-are-not-words" id="toc-tokens-are-not-words">Tokens
-Are Not Words</a></li>
-<li><a href="#bpe-as-a-compression-habit"
-id="toc-bpe-as-a-compression-habit">BPE as a Compression Habit</a></li>
-<li><a href="#vocabulary-size-is-a-systems-choice"
-id="toc-vocabulary-size-is-a-systems-choice">Vocabulary Size Is a
-Systems Choice</a></li>
-<li><a href="#context-is-a-budget" id="toc-context-is-a-budget">Context
-Is a Budget</a></li>
-<li><a href="#decoding-turns-probabilities-into-text"
-id="toc-decoding-turns-probabilities-into-text">Decoding Turns
-Probabilities Into Text</a></li>
-<li><a href="#autoregression-is-serial"
-id="toc-autoregression-is-serial">Autoregression Is Serial</a></li>
-<li><a href="#speculative-decoding-changes-the-work-shape"
-id="toc-speculative-decoding-changes-the-work-shape">Speculative
-Decoding Changes the Work Shape</a></li>
-<li><a href="#advanced-sidebar-eagle-as-a-hint-of-the-direction"
-id="toc-advanced-sidebar-eagle-as-a-hint-of-the-direction">Advanced
-Sidebar: EAGLE as a Hint of the Direction</a></li>
-<li><a href="#the-boundary-becomes-the-workload"
-id="toc-the-boundary-becomes-the-workload">The Boundary Becomes the
-Workload</a></li>
-</ul></li>
-</ul></li>
-<li><a href="#part-ii-single-device-computation"
-id="toc-part-ii-single-device-computation">Part II — Single-Device
+<li><a href="#part-ii-single-device-computation">Part II — Single-Device
 Computation</a>
 <ul>
-<li><a href="#chapter-4-inside-the-gpu-programming-model"
-id="toc-chapter-4-inside-the-gpu-programming-model">Chapter 4: Inside
-the GPU Programming Model</a>
-<ul>
-<li><a href="#operators-become-kernels"
-id="toc-operators-become-kernels">Operators Become Kernels</a></li>
-<li><a href="#host-and-device" id="toc-host-and-device">Host and
-Device</a></li>
-<li><a href="#launching-parallel-work"
-id="toc-launching-parallel-work">Launching Parallel Work</a></li>
-<li><a href="#one-thread-one-output" id="toc-one-thread-one-output">One
-Thread, One Output</a></li>
-<li><a href="#from-vectors-to-matrices"
-id="toc-from-vectors-to-matrices">From Vectors to Matrices</a></li>
-<li><a href="#sms-warps-and-simt" id="toc-sms-warps-and-simt">SMs,
-Warps, and SIMT</a></li>
-<li><a href="#memory-is-part-of-the-program"
-id="toc-memory-is-part-of-the-program">Memory Is Part of the
-Program</a></li>
-<li><a href="#the-gpu-server-is-a-system"
-id="toc-the-gpu-server-is-a-system">The GPU Server Is a System</a></li>
-<li><a href="#correct-is-not-fast" id="toc-correct-is-not-fast">Correct
-Is Not Fast</a></li>
+<li><a href="#chapter-4-inside-the-gpu-programming-model">Chapter 4:
+Inside the GPU Programming Model</a></li>
+<li><a href="#chapter-5-kernels-memory-and-transformer-blocks">Chapter
+5: Kernels, Memory, and Transformer Blocks</a></li>
+<li><a
+href="#chapter-6-flashattention-and-attention-acceleration">Chapter 6:
+FlashAttention and Attention Acceleration</a></li>
 </ul></li>
-<li><a href="#chapter-5-kernels-memory-and-transformer-blocks"
-id="toc-chapter-5-kernels-memory-and-transformer-blocks">Chapter 5:
-Kernels, Memory, and Transformer Blocks</a>
-<ul>
-<li><a href="#memory-bound-is-a-real-category"
-id="toc-memory-bound-is-a-real-category">Memory-Bound Is a Real
-Category</a></li>
-<li><a href="#naive-matrix-multiplication-wastes-reuse"
-id="toc-naive-matrix-multiplication-wastes-reuse">Naive Matrix
-Multiplication Wastes Reuse</a></li>
-<li><a href="#tiling-turns-bandwidth-into-reuse"
-id="toc-tiling-turns-bandwidth-into-reuse">Tiling Turns Bandwidth Into
-Reuse</a></li>
-<li><a href="#layout-decides-whether-warps-load-efficiently"
-id="toc-layout-decides-whether-warps-load-efficiently">Layout Decides
-Whether Warps Load Efficiently</a></li>
-<li><a href="#libraries-are-part-of-the-design"
-id="toc-libraries-are-part-of-the-design">Libraries Are Part of the
-Design</a></li>
-<li><a href="#transformer-blocks-are-mixed-workloads"
-id="toc-transformer-blocks-are-mixed-workloads">Transformer Blocks Are
-Mixed Workloads</a></li>
-<li><a href="#kernel-fusion-removes-unnecessary-boundaries"
-id="toc-kernel-fusion-removes-unnecessary-boundaries">Kernel Fusion
-Removes Unnecessary Boundaries</a></li>
-<li><a href="#reductions-are-synchronization-problems"
-id="toc-reductions-are-synchronization-problems">Reductions Are
-Synchronization Problems</a></li>
-<li><a href="#mixed-precision-changes-the-resource-model"
-id="toc-mixed-precision-changes-the-resource-model">Mixed Precision
-Changes the Resource Model</a></li>
-<li><a href="#memory-reuse-depends-on-liveness"
-id="toc-memory-reuse-depends-on-liveness">Memory Reuse Depends on
-Liveness</a></li>
-<li><a href="#the-chapter-5-pattern" id="toc-the-chapter-5-pattern">The
-Chapter 5 Pattern</a></li>
-</ul></li>
-<li><a href="#chapter-6-flashattention-and-attention-acceleration"
-id="toc-chapter-6-flashattention-and-attention-acceleration">Chapter 6:
-FlashAttention and Attention Acceleration</a>
-<ul>
-<li><a href="#standard-attention-materializes-the-problem"
-id="toc-standard-attention-materializes-the-problem">Standard Attention
-Materializes the Problem</a></li>
-<li><a href="#io-awareness" id="toc-io-awareness">IO-Awareness</a></li>
-<li><a href="#tiling-attention" id="toc-tiling-attention">Tiling
-Attention</a></li>
-<li><a href="#online-softmax-makes-blocks-exact"
-id="toc-online-softmax-makes-blocks-exact">Online Softmax Makes Blocks
-Exact</a></li>
-<li><a href="#backward-uses-recomputation"
-id="toc-backward-uses-recomputation">Backward Uses
-Recomputation</a></li>
-<li><a href="#io-complexity-is-the-argument"
-id="toc-io-complexity-is-the-argument">IO Complexity Is the
-Argument</a></li>
-<li><a href="#benchmarks-need-conditions"
-id="toc-benchmarks-need-conditions">Benchmarks Need Conditions</a></li>
-<li><a href="#why-this-belongs-in-a-systems-book"
-id="toc-why-this-belongs-in-a-systems-book">Why This Belongs in a
-Systems Book</a></li>
-<li><a href="#modern-hardware-keeps-moving"
-id="toc-modern-hardware-keeps-moving">Modern Hardware Keeps
-Moving</a></li>
-<li><a href="#decode-attention-is-different"
-id="toc-decode-attention-is-different">Decode Attention Is
-Different</a></li>
-<li><a href="#the-case-study" id="toc-the-case-study">The Case
-Study</a></li>
-</ul></li>
-</ul></li>
-<li><a href="#part-iii-training-systems"
-id="toc-part-iii-training-systems">Part III — Training Systems</a>
-<ul>
-<li><a href="#chapter-7-deep-learning-frameworks-jax-xla-and-tpu"
-id="toc-chapter-7-deep-learning-frameworks-jax-xla-and-tpu">Chapter 7:
-Deep Learning Frameworks, JAX, XLA, and TPU</a>
-<ul>
-<li><a href="#the-model-is-python-the-machine-wants-a-program"
-id="toc-the-model-is-python-the-machine-wants-a-program">The Model Is
-Python; the Machine Wants a Program</a></li>
-<li><a href="#autodiff-is-a-program-transformation"
-id="toc-autodiff-is-a-program-transformation">Autodiff Is a Program
-Transformation</a></li>
-<li><a href="#dynamic-static-and-functional-interfaces"
-id="toc-dynamic-static-and-functional-interfaces">Dynamic, Static, and
-Functional Interfaces</a></li>
-<li><a href="#jax-as-staged-array-programming"
-id="toc-jax-as-staged-array-programming">JAX as Staged Array
-Programming</a></li>
-<li><a href="#tracing-turns-python-into-jaxpr"
-id="toc-tracing-turns-python-into-jaxpr">Tracing Turns Python into
-JAXpr</a></li>
-<li><a href="#stablehlo-and-hlo-are-compiler-boundaries"
-id="toc-stablehlo-and-hlo-are-compiler-boundaries">StableHLO and HLO Are
-Compiler Boundaries</a></li>
-<li><a href="#shapes-and-layouts-are-systems-information"
-id="toc-shapes-and-layouts-are-systems-information">Shapes and Layouts
-Are Systems Information</a></li>
-<li><a href="#fusion-is-a-memory-decision"
-id="toc-fusion-is-a-memory-decision">Fusion Is a Memory
-Decision</a></li>
-<li><a href="#tpu-shows-why-the-backend-matters"
-id="toc-tpu-shows-why-the-backend-matters">TPU Shows Why the Backend
-Matters</a></li>
-<li><a href="#compilation-is-also-a-runtime-contract"
-id="toc-compilation-is-also-a-runtime-contract">Compilation Is Also a
-Runtime Contract</a></li>
-<li><a href="#sharding-turns-compilation-into-distributed-execution"
-id="toc-sharding-turns-compilation-into-distributed-execution">Sharding
-Turns Compilation into Distributed Execution</a></li>
-<li><a href="#when-the-compiler-is-not-enough"
-id="toc-when-the-compiler-is-not-enough">When the Compiler Is Not
-Enough</a></li>
-<li><a href="#pallas-grid-blocks-and-memory-movement"
-id="toc-pallas-grid-blocks-and-memory-movement">Pallas: Grid, Blocks,
-and Memory Movement</a></li>
-<li><a href="#pipelining-hides-transfer-latency"
-id="toc-pipelining-hides-transfer-latency">Pipelining Hides Transfer
-Latency</a></li>
-<li><a href="#tile-size-is-a-performance-parameter"
-id="toc-tile-size-is-a-performance-parameter">Tile Size Is a Performance
-Parameter</a></li>
-<li><a href="#splash-attention-as-a-boundary-case"
-id="toc-splash-attention-as-a-boundary-case">Splash Attention as a
-Boundary Case</a></li>
-<li><a href="#the-tradeoff-abstraction-boundary"
-id="toc-the-tradeoff-abstraction-boundary">The Tradeoff: Abstraction
-Boundary</a></li>
-<li><a href="#what-to-remember" id="toc-what-to-remember">What to
-Remember</a></li>
-</ul></li>
-<li><a href="#chapter-8-distributed-training-and-data-parallelism"
-id="toc-chapter-8-distributed-training-and-data-parallelism">Chapter 8:
-Distributed Training and Data Parallelism</a>
-<ul>
-<li><a href="#replicating-the-model-is-the-easy-part"
-id="toc-replicating-the-model-is-the-easy-part">Replicating the Model Is
-the Easy Part</a></li>
-<li><a href="#all-reduce-is-the-central-collective"
-id="toc-all-reduce-is-the-central-collective">All-Reduce Is the Central
-Collective</a></li>
-<li><a href="#ring-all-reduce-is-a-schedule"
-id="toc-ring-all-reduce-is-a-schedule">Ring All-Reduce Is a
-Schedule</a></li>
-<li><a href="#parameter-server-versus-all-reduce"
-id="toc-parameter-server-versus-all-reduce">Parameter Server Versus
-All-Reduce</a></li>
-<li><a href="#the-naive-ddp-critical-path"
-id="toc-the-naive-ddp-critical-path">The Naive DDP Critical
-Path</a></li>
-<li><a href="#gradient-buckets" id="toc-gradient-buckets">Gradient
-Buckets</a></li>
-<li><a href="#autograd-hooks-make-communication-timely"
-id="toc-autograd-hooks-make-communication-timely">Autograd Hooks Make
-Communication Timely</a></li>
-<li><a href="#overlap-is-conditional"
-id="toc-overlap-is-conditional">Overlap Is Conditional</a></li>
-<li><a href="#what-controls-scaling" id="toc-what-controls-scaling">What
-Controls Scaling</a></li>
-<li><a href="#boundary-to-model-and-state-parallelism"
-id="toc-boundary-to-model-and-state-parallelism">Boundary to Model and
-State Parallelism</a></li>
-<li><a href="#what-to-remember-1" id="toc-what-to-remember-1">What to
-Remember</a></li>
-</ul></li>
-<li><a href="#chapter-9-model-parallelism"
-id="toc-chapter-9-model-parallelism">Chapter 9: Model Parallelism</a>
-<ul>
-<li><a href="#data-parallelism-replicates-model-parallelism-partitions"
-id="toc-data-parallelism-replicates-model-parallelism-partitions">Data
-Parallelism Replicates; Model Parallelism Partitions</a></li>
-<li><a href="#pipeline-parallelism-splits-the-layers"
-id="toc-pipeline-parallelism-splits-the-layers">Pipeline Parallelism
-Splits the Layers</a></li>
-<li><a href="#the-naive-pipeline-wastes-devices"
-id="toc-the-naive-pipeline-wastes-devices">The Naive Pipeline Wastes
-Devices</a></li>
-<li><a href="#micro-batching-fills-the-pipeline"
-id="toc-micro-batching-fills-the-pipeline">Micro-Batching Fills the
-Pipeline</a></li>
-<li><a href="#activation-memory-becomes-a-schedule-problem"
-id="toc-activation-memory-becomes-a-schedule-problem">Activation Memory
-Becomes a Schedule Problem</a></li>
-<li><a href="#f1b-starts-backward-earlier"
-id="toc-f1b-starts-backward-earlier">1F1B Starts Backward
-Earlier</a></li>
-<li><a href="#interleaving-and-chunking-reduce-imbalance"
-id="toc-interleaving-and-chunking-reduce-imbalance">Interleaving and
-Chunking Reduce Imbalance</a></li>
-<li><a href="#pipeline-apis-expose-the-runtime-contract"
-id="toc-pipeline-apis-expose-the-runtime-contract">Pipeline APIs Expose
-the Runtime Contract</a></li>
-<li><a href="#tensor-parallelism-splits-the-matrix"
-id="toc-tensor-parallelism-splits-the-matrix">Tensor Parallelism Splits
-the Matrix</a></li>
-<li><a href="#transformer-ffn-tensor-parallelism"
-id="toc-transformer-ffn-tensor-parallelism">Transformer FFN Tensor
-Parallelism</a></li>
-<li><a href="#attention-head-parallelism"
-id="toc-attention-head-parallelism">Attention Head Parallelism</a></li>
-<li><a href="#embeddings-are-a-special-case"
-id="toc-embeddings-are-a-special-case">Embeddings Are a Special
-Case</a></li>
-<li><a href="#combining-tensor-pipeline-and-data-parallelism"
-id="toc-combining-tensor-pipeline-and-data-parallelism">Combining
-Tensor, Pipeline, and Data Parallelism</a></li>
-<li><a href="#what-to-remember-2" id="toc-what-to-remember-2">What to
-Remember</a></li>
-</ul></li>
-<li><a href="#chapter-10-zero-moe-and-training-memory"
-id="toc-chapter-10-zero-moe-and-training-memory">Chapter 10: ZeRO, MoE,
-and Training Memory</a>
-<ul>
-<li><a href="#the-memory-ledger-after-model-parallelism"
-id="toc-the-memory-ledger-after-model-parallelism">The Memory Ledger
-After Model Parallelism</a></li>
-<li><a href="#zero-remove-redundant-state"
-id="toc-zero-remove-redundant-state">ZeRO: Remove Redundant
-State</a></li>
-<li><a href="#zero-1-partitions-optimizer-states"
-id="toc-zero-1-partitions-optimizer-states">ZeRO-1 Partitions Optimizer
-States</a></li>
-<li><a href="#zero-2-partitions-gradients"
-id="toc-zero-2-partitions-gradients">ZeRO-2 Partitions
-Gradients</a></li>
-<li><a href="#zero-3-partitions-parameters"
-id="toc-zero-3-partitions-parameters">ZeRO-3 Partitions
-Parameters</a></li>
-<li><a href="#a-conditional-memory-formula"
-id="toc-a-conditional-memory-formula">A Conditional Memory
-Formula</a></li>
-<li><a href="#beyond-the-three-stages"
-id="toc-beyond-the-three-stages">Beyond the Three Stages</a></li>
-<li><a href="#moe-store-capacity-activate-sparsely"
-id="toc-moe-store-capacity-activate-sparsely">MoE: Store Capacity,
-Activate Sparsely</a></li>
-<li><a href="#routing-is-a-systems-problem"
-id="toc-routing-is-a-systems-problem">Routing Is a Systems
-Problem</a></li>
-<li><a href="#expert-parallelism-and-all-to-all"
-id="toc-expert-parallelism-and-all-to-all">Expert Parallelism and
-All-to-All</a></li>
-<li><a href="#all-to-all-is-not-a-detail"
-id="toc-all-to-all-is-not-a-detail">All-to-All Is Not a Detail</a></li>
-<li><a href="#shared-and-fine-grained-experts"
-id="toc-shared-and-fine-grained-experts">Shared and Fine-Grained
-Experts</a></li>
-<li><a href="#moe-inference-preview" id="toc-moe-inference-preview">MoE
-Inference Preview</a></li>
-<li><a href="#zero-and-moe-solve-different-problems"
-id="toc-zero-and-moe-solve-different-problems">ZeRO and MoE Solve
-Different Problems</a></li>
-<li><a href="#what-to-remember-3" id="toc-what-to-remember-3">What to
-Remember</a></li>
-</ul></li>
-</ul></li>
-<li><a href="#part-iv-adaptation-and-compression"
-id="toc-part-iv-adaptation-and-compression">Part IV — Adaptation and
-Compression</a>
+<li><a href="#part-iii-training-systems">Part III — Training Systems</a>
 <ul>
 <li><a
-href="#chapter-11-quantization-and-parameter-efficient-adaptation"
-id="toc-chapter-11-quantization-and-parameter-efficient-adaptation">Chapter
-11: Quantization and Parameter-Efficient Adaptation</a>
+href="#chapter-7-deep-learning-frameworks-jax-xla-and-tpu">Chapter 7:
+Deep Learning Frameworks, JAX, XLA, and TPU</a></li>
+<li><a
+href="#chapter-8-distributed-training-and-data-parallelism">Chapter 8:
+Distributed Training and Data Parallelism</a></li>
+<li><a href="#chapter-9-model-parallelism">Chapter 9: Model
+Parallelism</a></li>
+<li><a href="#chapter-10-zero-moe-and-training-memory">Chapter 10: ZeRO,
+MoE, and Training Memory</a></li>
+</ul></li>
+<li><a href="#part-iv-adaptation-and-compression">Part IV — Adaptation
+and Compression</a>
 <ul>
-<li><a href="#compression-and-adaptation-reopen-the-memory-ledger"
-id="toc-compression-and-adaptation-reopen-the-memory-ledger">Compression
-and Adaptation Reopen the Memory Ledger</a></li>
-<li><a href="#quantization-changes-representation"
-id="toc-quantization-changes-representation">Quantization Changes
-Representation</a></li>
-<li><a href="#scale-zero-point-and-error"
-id="toc-scale-zero-point-and-error">Scale, Zero Point, and
-Error</a></li>
-<li><a href="#post-training-quantization-and-calibration"
-id="toc-post-training-quantization-and-calibration">Post-Training
-Quantization and Calibration</a></li>
-<li><a href="#zeroquant-and-llm.int8-show-two-scaling-tactics"
-id="toc-zeroquant-and-llm.int8-show-two-scaling-tactics">ZeroQuant and
-LLM.int8 Show Two Scaling Tactics</a></li>
-<li><a href="#gptq-quantize-measure-error-compensate"
-id="toc-gptq-quantize-measure-error-compensate">GPTQ: Quantize, Measure
-Error, Compensate</a></li>
-<li><a href="#gptq-is-also-a-systems-method"
-id="toc-gptq-is-also-a-systems-method">GPTQ Is Also a Systems
-Method</a></li>
-<li><a href="#full-fine-tuning-carries-full-training-state"
-id="toc-full-fine-tuning-carries-full-training-state">Full Fine-Tuning
-Carries Full Training State</a></li>
-<li><a href="#peft-changes-what-is-trainable"
-id="toc-peft-changes-what-is-trainable">PEFT Changes What Is
-Trainable</a></li>
-<li><a href="#lora-low-rank-updates"
-id="toc-lora-low-rank-updates">LoRA: Low-Rank Updates</a></li>
-<li><a href="#adapter-placement-is-a-design-choice"
-id="toc-adapter-placement-is-a-design-choice">Adapter Placement Is a
-Design Choice</a></li>
-<li><a href="#qlora-combines-quantization-and-low-rank-training"
-id="toc-qlora-combines-quantization-and-low-rank-training">QLoRA
-Combines Quantization and Low-Rank Training</a></li>
-<li><a href="#deployment-consequences"
-id="toc-deployment-consequences">Deployment Consequences</a></li>
-<li><a href="#what-to-remember-4" id="toc-what-to-remember-4">What to
-Remember</a></li>
+<li><a
+href="#chapter-11-quantization-and-parameter-efficient-adaptation">Chapter
+11: Quantization and Parameter-Efficient Adaptation</a></li>
 </ul></li>
-</ul></li>
-<li><a href="#part-v-inference-and-serving"
-id="toc-part-v-inference-and-serving">Part V — Inference and Serving</a>
+<li><a href="#part-v-inference-and-serving">Part V — Inference and
+Serving</a>
 <ul>
-<li><a href="#chapter-12-the-cost-model-of-llm-inference"
-id="toc-chapter-12-the-cost-model-of-llm-inference">Chapter 12: The Cost
-Model of LLM Inference</a>
-<ul>
-<li><a href="#serving-is-online-not-a-training-step"
-id="toc-serving-is-online-not-a-training-step">Serving Is Online, Not a
-Training Step</a></li>
-<li><a href="#autoregressive-inference-has-two-phases"
-id="toc-autoregressive-inference-has-two-phases">Autoregressive
-Inference Has Two Phases</a></li>
-<li><a href="#latency-is-not-one-number"
-id="toc-latency-is-not-one-number">Latency Is Not One Number</a></li>
-<li><a href="#why-request-level-batching-fails"
-id="toc-why-request-level-batching-fails">Why Request-Level Batching
-Fails</a></li>
-<li><a href="#continuous-batching"
-id="toc-continuous-batching">Continuous Batching</a></li>
-<li><a href="#selective-batching" id="toc-selective-batching">Selective
-Batching</a></li>
-<li><a href="#the-scheduler-is-part-of-the-critical-path"
-id="toc-the-scheduler-is-part-of-the-critical-path">The Scheduler Is
-Part of the Critical Path</a></li>
-<li><a href="#kv-cache-is-serving-memory"
-id="toc-kv-cache-is-serving-memory">KV Cache Is Serving Memory</a></li>
-<li><a href="#prefix-reuse-and-cache-aware-scheduling"
-id="toc-prefix-reuse-and-cache-aware-scheduling">Prefix Reuse and
-Cache-Aware Scheduling</a></li>
-<li><a href="#tokenization-detokenization-and-routing-are-also-work"
-id="toc-tokenization-detokenization-and-routing-are-also-work">Tokenization,
-Detokenization, and Routing Are Also Work</a></li>
-<li><a href="#a-conceptual-cost-model"
-id="toc-a-conceptual-cost-model">A Conceptual Cost Model</a></li>
-<li><a href="#what-to-remember-5" id="toc-what-to-remember-5">What to
-Remember</a></li>
+<li><a href="#chapter-12-the-cost-model-of-llm-inference">Chapter 12:
+The Cost Model of LLM Inference</a></li>
+<li><a href="#chapter-13-kv-cache-pagedattention-and-vllm">Chapter 13:
+KV Cache, PagedAttention, and vLLM</a></li>
+<li><a
+href="#chapter-14-scheduling-caching-and-disaggregated-serving">Chapter
+14: Scheduling, Caching, and Disaggregated Serving</a></li>
 </ul></li>
-<li><a href="#chapter-13-kv-cache-pagedattention-and-vllm"
-id="toc-chapter-13-kv-cache-pagedattention-and-vllm">Chapter 13: KV
-Cache, PagedAttention, and vLLM</a>
-<ul>
-<li><a href="#why-kv-cache-becomes-the-serving-memory-problem"
-id="toc-why-kv-cache-becomes-the-serving-memory-problem">Why KV Cache
-Becomes the Serving Memory Problem</a></li>
-<li><a href="#why-contiguous-allocation-fails"
-id="toc-why-contiguous-allocation-fails">Why Contiguous Allocation
-Fails</a></li>
-<li><a href="#kv-blocks" id="toc-kv-blocks">KV Blocks</a></li>
-<li><a href="#logical-blocks-and-physical-blocks"
-id="toc-logical-blocks-and-physical-blocks">Logical Blocks and Physical
-Blocks</a></li>
-<li><a href="#pagedattention-as-a-kernel-contract"
-id="toc-pagedattention-as-a-kernel-contract">PagedAttention as a Kernel
-Contract</a></li>
-<li><a href="#fragmentation-after-paging"
-id="toc-fragmentation-after-paging">Fragmentation After Paging</a></li>
-<li><a href="#sharing-kv-blocks" id="toc-sharing-kv-blocks">Sharing KV
-Blocks</a></li>
-<li><a href="#memory-pressure-preemption-and-recovery"
-id="toc-memory-pressure-preemption-and-recovery">Memory Pressure,
-Preemption, and Recovery</a></li>
-<li><a href="#vllm-around-pagedattention"
-id="toc-vllm-around-pagedattention">vLLM Around PagedAttention</a></li>
-<li><a href="#the-design-lesson" id="toc-the-design-lesson">The Design
-Lesson</a></li>
-</ul></li>
-<li><a href="#chapter-14-scheduling-caching-and-disaggregated-serving"
-id="toc-chapter-14-scheduling-caching-and-disaggregated-serving">Chapter
-14: Scheduling, Caching, and Disaggregated Serving</a>
-<ul>
-<li><a href="#inference-at-scale-is-not-training-at-scale"
-id="toc-inference-at-scale-is-not-training-at-scale">Inference at Scale
-Is Not Training at Scale</a></li>
-<li><a href="#ttft-tpot-and-goodput"
-id="toc-ttft-tpot-and-goodput">TTFT, TPOT, and Goodput</a></li>
-<li><a href="#continuous-batching-is-necessary-but-not-sufficient"
-id="toc-continuous-batching-is-necessary-but-not-sufficient">Continuous
-Batching Is Necessary but Not Sufficient</a></li>
-<li><a href="#prefill-and-decode-want-different-systems"
-id="toc-prefill-and-decode-want-different-systems">Prefill and Decode
-Want Different Systems</a></li>
-<li><a href="#disaggregated-prefill-and-decode"
-id="toc-disaggregated-prefill-and-decode">Disaggregated Prefill and
-Decode</a></li>
-<li><a href="#placement-is-part-of-the-algorithm"
-id="toc-placement-is-part-of-the-algorithm">Placement Is Part of the
-Algorithm</a></li>
-<li><a href="#kv-aware-routing" id="toc-kv-aware-routing">KV-Aware
-Routing</a></li>
-<li><a href="#kv-cache-becomes-external-data"
-id="toc-kv-cache-becomes-external-data">KV Cache Becomes External
-Data</a></li>
-<li><a href="#memory-tiers-and-transfer"
-id="toc-memory-tiers-and-transfer">Memory Tiers and Transfer</a></li>
-<li><a href="#transfer-substrates" id="toc-transfer-substrates">Transfer
-Substrates</a></li>
-<li><a href="#mooncake-and-dynamo-as-architecture-examples"
-id="toc-mooncake-and-dynamo-as-architecture-examples">Mooncake and
-Dynamo as Architecture Examples</a></li>
-<li><a href="#advanced-cache-techniques"
-id="toc-advanced-cache-techniques">Advanced Cache Techniques</a></li>
-<li><a href="#the-design-lesson-1" id="toc-the-design-lesson-1">The
-Design Lesson</a></li>
-</ul></li>
-</ul></li>
-<li><a href="#part-vi-system-design-synthesis"
-id="toc-part-vi-system-design-synthesis">Part VI — System Design
+<li><a href="#part-vi-system-design-synthesis">Part VI — System Design
 Synthesis</a>
 <ul>
-<li><a href="#chapter-15-model-algorithm-system-co-design"
-id="toc-chapter-15-model-algorithm-system-co-design">Chapter 15:
-Model-Algorithm-System Co-Design</a>
-<ul>
-<li><a href="#the-simple-objective-becomes-a-stack"
-id="toc-the-simple-objective-becomes-a-stack">The Simple Objective
-Becomes a Stack</a></li>
-<li><a href="#co-design-means-joint-constraints"
-id="toc-co-design-means-joint-constraints">Co-Design Means Joint
-Constraints</a></li>
-<li><a href="#bottleneck-ownership"
-id="toc-bottleneck-ownership">Bottleneck Ownership</a></li>
-<li><a href="#synthesis-example-long-context"
-id="toc-synthesis-example-long-context">Synthesis Example: Long
-Context</a></li>
-<li><a href="#synthesis-example-large-training-run"
-id="toc-synthesis-example-large-training-run">Synthesis Example: Large
-Training Run</a></li>
-<li><a href="#synthesis-example-cheap-adaptation-and-serving"
-id="toc-synthesis-example-cheap-adaptation-and-serving">Synthesis
-Example: Cheap Adaptation and Serving</a></li>
-<li><a href="#synthesis-example-goodput-oriented-serving"
-id="toc-synthesis-example-goodput-oriented-serving">Synthesis Example:
-Goodput-Oriented Serving</a></li>
-<li><a href="#scaling-up-and-scaling-down"
-id="toc-scaling-up-and-scaling-down">Scaling Up and Scaling
-Down</a></li>
-<li><a href="#the-engineering-checklist"
-id="toc-the-engineering-checklist">The Engineering Checklist</a></li>
-<li><a href="#what-to-remember-6" id="toc-what-to-remember-6">What to
-Remember</a></li>
+<li><a href="#chapter-15-model-algorithm-system-co-design">Chapter 15:
+Model-Algorithm-System Co-Design</a></li>
 </ul></li>
-</ul></li>
-<li><a href="#references" id="toc-references">References</a>
-<ul>
-<li><a href="#chapter-source-map" id="toc-chapter-source-map">Chapter
-Source Map</a>
-<ul>
-<li><a href="#why-llm-systems"
-id="toc-why-llm-systems"><code>01-why-llm-systems</code></a></li>
-<li><a href="#tokens-probability-transformers"
-id="toc-tokens-probability-transformers"><code>02-tokens-probability-transformers</code></a></li>
-<li><a href="#tokenization-context-decoding"
-id="toc-tokenization-context-decoding"><code>03-tokenization-context-decoding</code></a></li>
-<li><a href="#gpu-programming-model"
-id="toc-gpu-programming-model"><code>04-gpu-programming-model</code></a></li>
-<li><a href="#kernels-memory-transformer-blocks"
-id="toc-kernels-memory-transformer-blocks"><code>05-kernels-memory-transformer-blocks</code></a></li>
-<li><a href="#flashattention-transformer-acceleration"
-id="toc-flashattention-transformer-acceleration"><code>06-flashattention-transformer-acceleration</code></a></li>
-<li><a href="#dl-frameworks-and-compilers"
-id="toc-dl-frameworks-and-compilers"><code>07-dl-frameworks-and-compilers</code></a></li>
-<li><a href="#distributed-training-ddp"
-id="toc-distributed-training-ddp"><code>08-distributed-training-ddp</code></a></li>
-<li><a href="#model-parallelism"
-id="toc-model-parallelism"><code>09-model-parallelism</code></a></li>
-<li><a href="#zero-moe-and-memory"
-id="toc-zero-moe-and-memory"><code>10-zero-moe-and-memory</code></a></li>
-<li><a href="#quantization-and-peft"
-id="toc-quantization-and-peft"><code>11-quantization-and-peft</code></a></li>
-<li><a href="#inference-cost-model"
-id="toc-inference-cost-model"><code>12-inference-cost-model</code></a></li>
-<li><a href="#kv-cache-vllm-pagedattention"
-id="toc-kv-cache-vllm-pagedattention"><code>13-kv-cache-vllm-pagedattention</code></a></li>
-<li><a href="#serving-scheduling-and-disaggregation"
-id="toc-serving-scheduling-and-disaggregation"><code>14-serving-scheduling-and-disaggregation</code></a></li>
-<li><a href="#llm-system-codesign"
-id="toc-llm-system-codesign"><code>15-llm-system-codesign</code></a></li>
-</ul></li>
-<li><a href="#bibliography" id="toc-bibliography">Bibliography</a></li>
-<li><a href="#generation-summary" id="toc-generation-summary">Generation
-Summary</a></li>
-</ul></li>
-<li><a href="#index" id="toc-index">Index</a>
-<ul>
-<li><a href="#chapter-map" id="toc-chapter-map">Chapter Map</a></li>
-<li><a href="#core-terms" id="toc-core-terms">Core Terms</a></li>
-<li><a href="#topic-index" id="toc-topic-index">Topic Index</a></li>
-<li><a href="#generation-summary-1"
-id="toc-generation-summary-1">Generation Summary</a></li>
-</ul></li>
+<li><a href="#references">References</a></li>
+<li><a href="#index">Index</a></li>
 </ul>
-</nav>
 <h1 class="part-title" id="part-i-the-shape-of-the-problem">Part I — The
 Shape of the Problem</h1>
 <h2 class="chapter-title"
